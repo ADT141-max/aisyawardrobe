@@ -9,10 +9,10 @@ import {
 } from 'lucide-react';
 
 // ============================================================================
-// 1. FIREBASE CONFIGURATION & INITIALIZATION
-// ==========================================
+// 1. FIREBASE CONFIGURATION & INITIALIZATION (DENGAN REAL-TIME ONSNAPSHOT)
+// ============================================================================
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
 
 // Kunci Firebase Asli Aisya Wardrobe
 const firebaseConfig = {
@@ -33,9 +33,8 @@ const stateDocRef = doc(dbFirestore, "aisya_database", "main_state");
 
 // ============================================================================
 // 2. KUNCI SERVER GAMBAR GRATIS (IMGBB)
-// ==========================================
-const IMGBB_API_KEY = "aab30f3a1714c46f739b7d56dd87a5b3"; 
 // ============================================================================
+const IMGBB_API_KEY = "aab30f3a1714c46f739b7d56dd87a5b3"; 
 
 
 // ============================================================================
@@ -69,13 +68,10 @@ const uploadImageToServer = async (base64Image) => {
   }
   
   try {
-    // Membuang teks awalan 'data:image/jpeg;base64,' agar ImgBB bisa membacanya
     const base64Data = base64Image.split(',')[1]; 
-    
     const formData = new FormData();
     formData.append('image', base64Data);
 
-    // Mengirim gambar langsung ke server ImgBB
     const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
       method: 'POST',
       body: formData
@@ -84,7 +80,7 @@ const uploadImageToServer = async (base64Image) => {
     const data = await response.json();
     
     if (data.success) {
-      return data.data.url; // Berhasil! Mengembalikan URL gambar permanen
+      return data.data.url; 
     } else {
       console.error("Gagal dari server ImgBB:", data);
       return base64Image;
@@ -154,27 +150,27 @@ const AppStateProvider = ({ children }) => {
   const cTheme = themeColors[db.brandConfig?.themeColor] || themeColors.rose;
 
   useEffect(() => {
-    const fetchDatabase = async () => {
-      try {
-        const docSnap = await getDoc(stateDocRef);
-        if (docSnap.exists()) {
-           const data = docSnap.data();
-           setDb(prev => ({
-              ...prev, ...data, 
-              users: data.users && data.users.length > 0 ? data.users : prev.users,
-              categories: data.categories && data.categories.length > 0 ? data.categories : prev.categories
-           }));
-        } else {
-           console.log("Database kosong, membuat inisialisasi awal...");
-           await setDoc(stateDocRef, getInitialData());
-        }
-      } catch (error) { 
-        console.error("Firebase Load Error:", error); 
-      } finally { 
-        setIsDbLoading(false); 
-      } 
-    };
-    fetchDatabase();
+    // onSnapshot akan "menonton" database nonstop
+    const unsubscribe = onSnapshot(stateDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+         const data = docSnap.data();
+         setDb(prev => ({
+            ...prev, ...data, 
+            users: data.users && data.users.length > 0 ? data.users : prev.users,
+            categories: data.categories && data.categories.length > 0 ? data.categories : prev.categories
+         }));
+      } else {
+         console.log("Database kosong, membuat inisialisasi awal...");
+         setDoc(stateDocRef, getInitialData());
+      }
+      setIsDbLoading(false);
+    }, (error) => { 
+      console.error("Firebase Sync Error:", error); 
+      setIsDbLoading(false); 
+    });
+
+    // Membersihkan watcher jika komponen dibongkar
+    return () => unsubscribe();
   }, []);
 
   const saveToDatabase = (newDbState) => {
@@ -191,7 +187,7 @@ const AppStateProvider = ({ children }) => {
         setSaveStatus('Gagal ✗'); 
         console.error(error);
       }
-    }, 1500); 
+    }, 1000); 
   };
 
   const updateDb = (key, value) => { saveToDatabase({ ...db, [key]: value }); };
@@ -418,7 +414,7 @@ const SplashScreen = () => {
         <Package className="w-12 h-12 text-rose-400" />
       </div>
       <h1 className="text-3xl font-serif font-bold text-white tracking-widest uppercase mb-2 animate-fade-in-down">Aisya Wardrobe</h1>
-      <p className="text-stone-400 text-sm tracking-wide">Sinkronisasi Database...</p>
+      <p className="text-stone-400 text-sm tracking-wide">Membuka Brankas Sinkronisasi...</p>
       <div className="mt-8 w-48 h-1 bg-stone-800 rounded-full overflow-hidden">
         <div className="h-full bg-rose-500 w-1/2 animate-[spin_2s_linear_infinite]" style={{ animationName: 'loadingBar', animationDuration: '1.5s', animationIterationCount: 'infinite' }}></div>
       </div>
