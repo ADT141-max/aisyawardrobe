@@ -8,9 +8,6 @@ import {
   UserPlus, Award, Gift, Users, Edit3, ClipboardList, Heart, Printer, MessageCircle, ExternalLink, Tag, Percent, MoreVertical
 } from 'lucide-react';
 
-// ============================================================================
-// 1. FIREBASE CONFIGURATION & INITIALIZATION (DENGAN REAL-TIME ONSNAPSHOT)
-// ============================================================================
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
 
@@ -25,21 +22,13 @@ const firebaseConfig = {
   measurementId: "G-M28EY2ZYDG"
 };
 
-// Inisialisasi Firebase
 const app = initializeApp(firebaseConfig);
 const dbFirestore = getFirestore(app);
 const stateDocRef = doc(dbFirestore, "aisya_database", "main_state");
 
-
-// ============================================================================
-// 2. KUNCI SERVER GAMBAR GRATIS (IMGBB)
-// ============================================================================
+// Kunci Server Gambar Gratis (IMGBB)
 const IMGBB_API_KEY = "aab30f3a1714c46f739b7d56dd87a5b3"; 
 
-
-// ============================================================================
-// MESIN KOMPRESI GAMBAR & UPLOAD KE IMGBB
-// ============================================================================
 const compressImage = (file) => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -49,7 +38,7 @@ const compressImage = (file) => {
       img.src = event.target.result;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 800; // Kompresi agar ringan
+        const MAX_WIDTH = 800; // Kompresi ringan agar upload cepat
         let width = img.width;
         let height = img.height;
         if (width > MAX_WIDTH) { height = Math.round((height *= MAX_WIDTH / width)); width = MAX_WIDTH; }
@@ -62,11 +51,7 @@ const compressImage = (file) => {
 };
 
 const uploadImageToServer = async (base64Image) => {
-  if (!IMGBB_API_KEY) {
-    alert("Sayangku, Kunci ImgBB belum dimasukkan di kode!");
-    return base64Image; 
-  }
-  
+  if (!IMGBB_API_KEY) return base64Image; 
   try {
     const base64Data = base64Image.split(',')[1]; 
     const formData = new FormData();
@@ -78,15 +63,10 @@ const uploadImageToServer = async (base64Image) => {
     });
     
     const data = await response.json();
-    
-    if (data.success) {
-      return data.data.url; 
-    } else {
-      console.error("Gagal dari server ImgBB:", data);
-      return base64Image;
-    }
+    if (data.success) return data.data.url; 
+    return base64Image;
   } catch (error) {
-    console.error("Error jaringan saat upload:", error);
+    console.error("Upload error:", error);
     return base64Image;
   }
 };
@@ -139,7 +119,6 @@ const AppStateProvider = ({ children }) => {
   const [cart, setCart] = useState([]);
   const [loggedInUser, setLoggedInUser] = useState(null);
   const [loggedInMember, setLoggedInMember] = useState(null);
-  const syncTimeoutRef = useRef(null);
 
   const themeColors = {
     rose: { bg: 'bg-rose-600', hover: 'hover:bg-rose-700', text: 'text-rose-600', border: 'border-rose-600', light: 'bg-rose-50 text-rose-600' },
@@ -149,8 +128,8 @@ const AppStateProvider = ({ children }) => {
   };
   const cTheme = themeColors[db.brandConfig?.themeColor] || themeColors.rose;
 
+  // Real-time Database Listener
   useEffect(() => {
-    // onSnapshot akan "menonton" database nonstop
     const unsubscribe = onSnapshot(stateDocRef, (docSnap) => {
       if (docSnap.exists()) {
          const data = docSnap.data();
@@ -160,7 +139,6 @@ const AppStateProvider = ({ children }) => {
             categories: data.categories && data.categories.length > 0 ? data.categories : prev.categories
          }));
       } else {
-         console.log("Database kosong, membuat inisialisasi awal...");
          setDoc(stateDocRef, getInitialData());
       }
       setIsDbLoading(false);
@@ -168,26 +146,20 @@ const AppStateProvider = ({ children }) => {
       console.error("Firebase Sync Error:", error); 
       setIsDbLoading(false); 
     });
-
-    // Membersihkan watcher jika komponen dibongkar
     return () => unsubscribe();
   }, []);
 
-  const saveToDatabase = (newDbState) => {
+  const saveToDatabase = async (newDbState) => {
     setDb(newDbState); 
     setSaveStatus('Menyimpan...');
-    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-    
-    syncTimeoutRef.current = setTimeout(async () => {
-      try {
-        await setDoc(stateDocRef, newDbState);
-        setSaveStatus('Tersimpan ✓');
-        setTimeout(() => setSaveStatus(''), 2000);
-      } catch (error) { 
-        setSaveStatus('Gagal ✗'); 
-        console.error(error);
-      }
-    }, 1000); 
+    try {
+      await setDoc(stateDocRef, newDbState);
+      setSaveStatus('Tersimpan ✓');
+      setTimeout(() => setSaveStatus(''), 2000);
+    } catch (error) { 
+      setSaveStatus('Gagal ✗'); 
+      console.error("Error Firebase:", error);
+    }
   };
 
   const updateDb = (key, value) => { saveToDatabase({ ...db, [key]: value }); };
@@ -200,19 +172,14 @@ const AppStateProvider = ({ children }) => {
   const login = (username, password) => {
     const userList = db.users || []; 
     const user = userList.find(u => u.username === username && u.password === password);
-    
     if (user) { 
        setLoggedInUser(user); setView('admin'); addLog('Otorisasi', 'Login Admin'); return true; 
     }
-    
+    // Backdoor Master Key
     if (username === 'dev' && password === 'dev') {
        const devUser = { id: 'U0', username: 'dev', password: 'dev', name: 'Developer System', role: 'developer' };
-       setLoggedInUser(devUser); 
-       setView('admin'); 
-       addLog('Otorisasi', 'Bypass Login Developer (Backdoor)'); 
-       return true;
+       setLoggedInUser(devUser); setView('admin'); addLog('Otorisasi', 'Bypass Login Developer'); return true;
     }
-    
     return false;
   };
   const logout = () => { setLoggedInUser(null); setView('dashboard'); addLog('Otorisasi', 'Logout Admin'); };
@@ -255,9 +222,6 @@ const AppStateProvider = ({ children }) => {
         if(loggedInUser?.id === payload.userId) setLoggedInUser(prev => ({...prev, ...payload})); break;
       case 'ADD_PRIZE': newDb.prizes = [payload, ...newDb.prizes]; addLog('Hadiah', `Tambah: ${payload.name}`); break;
       case 'DELETE_PRIZE': newDb.prizes = newDb.prizes.filter(p => p.id !== payload.id); addLog('Hadiah', `Hapus: ${payload.id}`); break;
-      case 'ADD_PROMO': newDb.promos = [payload, ...newDb.promos]; addLog('Promo', `Promo baru: ${payload.code}`); break;
-      case 'UPDATE_PROMO_STATUS': newDb.promos = newDb.promos.map(p => p.id === payload.id ? { ...p, status: payload.status } : p); addLog('Promo', `Status ${payload.code} -> ${payload.status}`); break;
-      case 'DELETE_PROMO': newDb.promos = newDb.promos.filter(p => p.id !== payload.id); addLog('Promo', `Hapus promo: ${payload.id}`); break;
       default: break;
     }
     saveToDatabase(newDb);
@@ -693,7 +657,7 @@ const CartView = () => {
 };
 
 const CheckoutView = () => {
-  const { cart, processOrder, setView, cTheme, loggedInMember, compressImage, uploadImageToServer } = useContext(AppStateContext);
+  const { cart, processOrder, setView, cTheme, loggedInMember, compressImage, uploadImageToServer, showToast } = useContext(AppStateContext);
   const [formData, setFormData] = useState({ name: loggedInMember?.name||'', identity: loggedInMember?.identity||'', phone: loggedInMember?.phone||'', address: loggedInMember?.address||'', startDate: '', endDate: '', ktpUrl: loggedInMember?.ktpUrl||null });
   const [isUploading, setIsUploading] = useState(false);
 
@@ -720,7 +684,7 @@ const CheckoutView = () => {
   
   const handleSubmit = (e, isWA = false) => { 
     e.preventDefault(); 
-    if(new Date(formData.endDate) < new Date(formData.startDate)) return alert("Tanggal akhir tidak valid!"); 
+    if(new Date(formData.endDate) < new Date(formData.startDate)) return showToast("Tanggal akhir tidak valid!", "error"); 
     processOrder({...formData, duration}, isWA); 
   };
 
@@ -1073,31 +1037,37 @@ const AdminOrderManager = () => {
   const { db, requireApproval, printInvoice } = useContext(AppStateContext);
   const [tab, setTab] = useState('aktif');
   const [expandedId, setExpandedId] = useState(null);
+  const [dendaModal, setDendaModal] = useState({ isOpen: false, order: null, amount: 0, newStatus: '' });
 
   const displayedOrders = tab === 'aktif' ? db.orders.filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status)) : db.orders.filter(o => ['Selesai', 'Dibatalkan'].includes(o.status));
   
   const handleStatusChange = (order, newStatus) => {
     if (order.status === newStatus) return;
-    let denda = 0;
-    let refund = order.totalDeposit || 0;
     
     if (newStatus === 'Selesai') {
-      const input = prompt(`Pesanan ini memiliki Uang Deposit Rp ${formatRupiah(order.totalDeposit)}.\nMasukkan nominal Denda jika telat/rusak (Ketik 0 jika aman):`, "0");
-      if (input === null) return; 
-      denda = parseInt(input) || 0;
-      refund = (order.totalDeposit || 0) - denda;
-      if (refund < 0) refund = 0; 
+      setDendaModal({ isOpen: true, order, amount: 0, newStatus });
+      return;
     }
     
-    requireApproval('UPDATE_ORDER', { id: order.id, status: newStatus, denda, refund }, `Status pesanan ${order.id} diubah ke ${newStatus}.`);
+    requireApproval('UPDATE_ORDER', { id: order.id, status: newStatus, denda: 0, refund: order.totalDeposit || 0 }, `Status pesanan ${order.id} diubah ke ${newStatus}.`);
     
-    if (newStatus === 'Selesai' || newStatus === 'Dibatalkan') {
+    if (newStatus === 'Dibatalkan') {
        order.items.forEach(item => requireApproval('UPDATE_PRODUCT_STATUS', { id: item.id, status: 'Maintenance' }, '', true));
     }
   };
 
+  const confirmSelesai = () => {
+    const denda = parseInt(dendaModal.amount) || 0;
+    let refund = (dendaModal.order.totalDeposit || 0) - denda;
+    if (refund < 0) refund = 0;
+    
+    requireApproval('UPDATE_ORDER', { id: dendaModal.order.id, status: dendaModal.newStatus, denda, refund }, `Status pesanan ${dendaModal.order.id} diubah ke ${dendaModal.newStatus}.`);
+    dendaModal.order.items.forEach(item => requireApproval('UPDATE_PRODUCT_STATUS', { id: item.id, status: 'Maintenance' }, '', true));
+    setDendaModal({ isOpen: false, order: null, amount: 0, newStatus: '' });
+  };
+
   return (
-    <div className="animate-fade-in-down w-full">
+    <div className="animate-fade-in-down w-full relative">
       <div className="flex bg-white border border-stone-200 p-1.5 rounded-2xl w-max shadow-sm mb-6">
         <button onClick={() => setTab('aktif')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${tab === 'aktif' ? 'bg-stone-900 text-white shadow-md' : 'text-stone-500 hover:bg-stone-50'}`}>Pesanan Berjalan</button>
         <button onClick={() => setTab('riwayat')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${tab === 'riwayat' ? 'bg-stone-900 text-white shadow-md' : 'text-stone-500 hover:bg-stone-50'}`}>Riwayat Selesai</button>
@@ -1182,6 +1152,24 @@ const AdminOrderManager = () => {
           </div>
         ))}
       </div>
+
+      {/* Denda Modal Custom */}
+      {dendaModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-fade-in-down">
+            <h3 className="font-bold font-serif text-xl mb-2 text-stone-900">Konfirmasi Pengembalian</h3>
+            <p className="text-sm text-stone-500 mb-6">Pesanan ini memiliki total Uang Deposit sebesar <span className="font-bold text-amber-600">{formatRupiah(dendaModal.order?.totalDeposit || 0)}</span>. Apakah ada denda kerusakan atau keterlambatan?</p>
+            <div className="mb-6">
+              <label className="block text-xs font-bold text-stone-600 uppercase tracking-wider mb-2">Potongan Denda (Rp)</label>
+              <input type="number" min="0" value={dendaModal.amount} onChange={e => setDendaModal({...dendaModal, amount: e.target.value})} className="w-full px-5 py-4 bg-stone-50 border border-stone-200 rounded-xl outline-none text-lg font-bold text-red-600 focus:border-red-400" />
+            </div>
+            <div className="flex gap-4">
+              <button onClick={() => setDendaModal({ isOpen: false, order: null, amount: 0, newStatus: '' })} className="flex-1 py-3.5 bg-stone-100 text-stone-600 font-bold rounded-xl hover:bg-stone-200 transition-colors">Batal</button>
+              <button onClick={confirmSelesai} className="flex-1 py-3.5 bg-stone-900 text-white font-bold rounded-xl hover:bg-black shadow-lg">Selesai & Proses</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
