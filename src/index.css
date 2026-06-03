@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Animasi tambahan dan pembersih scrollbar */
+.no-scrollbar::-webkit-scrollbar {
+display: none;
+}
+.no-scrollbar {
+-ms-overflow-style: none;
+scrollbar-width: none;
+}
+.animate-fade-in-down {
+animation: fade-in-down 0.4s ease-out forwards;
+}
+@keyframes fade-in-down {
+0% { opacity: 0; transform: translateY(-15px); }
+100% { opacity: 1; transform: translateY(0); }
+}

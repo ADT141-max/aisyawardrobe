@@ -1,0 +1,1879 @@
+import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
+import { 
+  ShoppingCart, Home, LayoutDashboard, Package, Trash2, Plus, 
+  X, Image as ImageIcon, CheckCircle, Clock, ChevronDown, BarChart3, 
+  AlertCircle, Search, Menu, LogOut, User, Settings as SettingsIcon, 
+  Calendar as CalendarIcon, ChevronLeft, ChevronRight, Upload, Shield, 
+  Briefcase, FileText, Database, Download, UploadCloud, Terminal,
+  UserPlus, Award, Gift, Users, Edit3, ClipboardList, Heart, Printer, MessageCircle, ExternalLink, Tag, Percent, MoreVertical
+} from 'lucide-react';
+
+// ============================================================================
+// 1. FIREBASE CONFIGURATION & INITIALIZATION
+// ==========================================
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+import { getStorage, ref, uploadString, getDownloadURL } from "firebase/storage";
+
+// 👇 SAYANGKU, MASUKKAN KUNCI FIREBASE-MU DI SINI NANTI YAA 👇
+const firebaseConfig = {
+  apiKey: "AIzaSyAtiK53dCj69ec0BRCwz4uJNuCAsV9dlUE",
+  authDomain: "aisyawardrobe01.firebaseapp.com",
+  projectId: "aisyawardrobe01",
+  storageBucket: "aisyawardrobe01.firebasestorage.app",
+  messagingSenderId: "87038023584",
+  appId: "1:87038023584:web:bb193e8cb3f4970bcd76c5",
+  measurementId: "G-M28EY2ZYDG"
+};
+
+// Inisialisasi Firebase
+const app = initializeApp(firebaseConfig);
+const dbFirestore = getFirestore(app);
+const storage = getStorage(app);
+const stateDocRef = doc(dbFirestore, "aisya_database", "main_state");
+// ============================================================================
+
+
+// ============================================================================
+// MESIN KOMPRESI GAMBAR & UPLOAD KE FIREBASE STORAGE
+// ============================================================================
+const compressImage = (file) => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 800; // Kompresi aman 800px
+        let width = img.width;
+        let height = img.height;
+        if (width > MAX_WIDTH) { height = Math.round((height *= MAX_WIDTH / width)); width = MAX_WIDTH; }
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.6)); // Format data_url Base64
+      };
+    };
+  });
+};
+
+const uploadImageToServer = async (base64Image) => {
+  // Jika API Key belum diisi (masih default), kembalikan base64 agar aplikasi tidak crash saat tes
+  if (firebaseConfig.apiKey === "API_KEY_KAMU") return base64Image; 
+  
+  try {
+    const fileName = `images/aw_img_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
+    const storageRef = ref(storage, fileName);
+    await uploadString(storageRef, base64Image, 'data_url');
+    const downloadURL = await getDownloadURL(storageRef);
+    return downloadURL;
+  } catch (error) {
+    console.error("Gagal Upload ke Firebase Storage:", error);
+    return base64Image; // Fallback jika gagal
+  }
+};
+
+const AppStateContext = createContext();
+const formatRupiah = (number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number || 0);
+
+const Toast = ({ message, type, onClose }) => {
+  useEffect(() => { const timer = setTimeout(() => onClose(), 3000); return () => clearTimeout(timer); }, [onClose]);
+  return (
+    <div className="fixed top-5 left-1/2 transform -translate-x-1/2 z-[100] animate-fade-in-down w-[90%] md:w-max max-w-md">
+      <div className={`flex items-center gap-3 px-6 py-3 rounded-xl shadow-lg border ${type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : type === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
+        {type === 'success' ? <CheckCircle className="w-5 h-5 flex-shrink-0 text-green-500" /> : type === 'error' ? <AlertCircle className="w-5 h-5 flex-shrink-0 text-red-500" /> : <Shield className="w-5 h-5 flex-shrink-0 text-blue-500" />}
+        <span className="font-medium text-sm leading-tight">{message}</span>
+      </div>
+    </div>
+  );
+};
+
+const getInitialData = () => ({
+  products: [
+    { id: 'KE-1001', name: 'Kebaya Kutu Baru Modern', price: 150000, deposit: 50000, category: 'Kebaya', images: ['https://images.unsplash.com/photo-1595124021575-8167db2011b6?auto=format&fit=crop&q=80&w=400'], desc: 'Kebaya modern warna pastel.', totalStock: 5, status: 'Tersedia', productLink: '' },
+    { id: 'JS-1001', name: 'Jas Formal Pria Hitam', price: 200000, deposit: 100000, category: 'Jas', images: ['https://images.unsplash.com/photo-1593030761756-1d8dd2a7eef3?auto=format&fit=crop&q=80&w=400'], desc: 'Jas slimfit elegan.', totalStock: 3, status: 'Tersedia', productLink: '' }
+  ],
+  categories: ['Kebaya', 'Jas', 'Batik', 'Gaun', 'Aksesoris'],
+  orders: [],
+  users: [
+    { id: 'U0', username: 'dev', password: 'dev', name: 'Developer System', role: 'developer' },
+    { id: 'U1', username: 'owner', password: 'owner123', name: 'Owner Aisya', role: 'owner' },
+    { id: 'U2', username: 'manager', password: 'manager123', name: 'Manajer Operasional', role: 'manager' },
+    { id: 'U3', username: 'admin', password: 'admin123', name: 'Admin Kasir', role: 'admin' }
+  ],
+  members: [],
+  prizes: [{ id: 'PRZ-01', name: 'Voucher Rp 50k', points: 500, image: '', desc: 'Diskon sewa' }],
+  promos: [],
+  logs: [],
+  approvals: [],
+  brandConfig: {
+    appName: 'Aisya Wardrobe', slogan: 'Sewa Pakaian Premium & Eksklusif', companyBio: 'Penyedia layanan sewa pakaian premium terpercaya untuk momen spesial Anda.',
+    logoUrl: '', appIcon: '', themeColor: 'rose', companyEmail: 'admin@aisyawardrobe.com',
+    socialMedia: [{ type: 'WhatsApp', value: '6281234567890', label: 'Hubungi Kami' }]
+  }
+});
+
+const AppStateProvider = ({ children }) => {
+  const [isDbLoading, setIsDbLoading] = useState(true);
+  const [saveStatus, setSaveStatus] = useState('');
+  const [toast, setToast] = useState(null);
+  const showToast = (message, type = 'success') => setToast({ message, type });
+
+  const [db, setDb] = useState(getInitialData());
+  const [view, setView] = useState('dashboard');
+  const [cart, setCart] = useState([]);
+  const [loggedInUser, setLoggedInUser] = useState(null);
+  const [loggedInMember, setLoggedInMember] = useState(null);
+  const syncTimeoutRef = useRef(null);
+
+  const themeColors = {
+    rose: { bg: 'bg-rose-600', hover: 'hover:bg-rose-700', text: 'text-rose-600', border: 'border-rose-600', light: 'bg-rose-50 text-rose-600' },
+    amber: { bg: 'bg-amber-600', hover: 'hover:bg-amber-700', text: 'text-amber-600', border: 'border-amber-600', light: 'bg-amber-50 text-amber-600' },
+    emerald: { bg: 'bg-emerald-600', hover: 'hover:bg-emerald-700', text: 'text-emerald-600', border: 'border-emerald-600', light: 'bg-emerald-50 text-emerald-600' },
+    slate: { bg: 'bg-slate-800', hover: 'hover:bg-slate-900', text: 'text-slate-800', border: 'border-slate-800', light: 'bg-slate-100 text-slate-800' },
+  };
+  const cTheme = themeColors[db.brandConfig?.themeColor] || themeColors.rose;
+
+  useEffect(() => {
+    const fetchDatabase = async () => {
+      try {
+        if (firebaseConfig.apiKey === "API_KEY_KAMU") {
+           console.log("Firebase belum diatur, menggunakan data lokal sementara.");
+           setTimeout(() => setIsDbLoading(false), 1000);
+           return;
+        }
+
+        const docSnap = await getDoc(stateDocRef);
+        if (docSnap.exists()) {
+           const data = docSnap.data();
+           setDb(prev => ({
+              ...prev, ...data, 
+              users: data.users && data.users.length > 0 ? data.users : prev.users,
+              categories: data.categories && data.categories.length > 0 ? data.categories : prev.categories
+           }));
+        } else {
+           console.log("Database kosong, membuat inisialisasi awal...");
+           await setDoc(stateDocRef, getInitialData());
+        }
+      } catch (error) { 
+        console.error("Firebase Load Error:", error); 
+      } finally { 
+        setIsDbLoading(false); 
+      } 
+    };
+    fetchDatabase();
+  }, []);
+
+  const saveToDatabase = (newDbState) => {
+    setDb(newDbState); 
+    setSaveStatus('Menyimpan...');
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    
+    syncTimeoutRef.current = setTimeout(async () => {
+      try {
+        if (firebaseConfig.apiKey !== "API_KEY_KAMU") {
+           await setDoc(stateDocRef, newDbState);
+        }
+        setSaveStatus('Tersimpan ✓');
+        setTimeout(() => setSaveStatus(''), 2000);
+      } catch (error) { 
+        setSaveStatus('Gagal ✗'); 
+        console.error(error);
+      }
+    }, 1500); 
+  };
+
+  const updateDb = (key, value) => { saveToDatabase({ ...db, [key]: value }); };
+
+  const addLog = (action, detail, user = loggedInUser?.name || 'Sistem') => {
+    const newLog = { id: `LOG-${Date.now()}`, timestamp: new Date().toLocaleString(), user, action, detail };
+    updateDb('logs', [newLog, ...(db.logs || [])]);
+  };
+
+  const login = (username, password) => {
+    const userList = db.users || []; 
+    const user = userList.find(u => u.username === username && u.password === password);
+    
+    // Login normal jika ada di database
+    if (user) { 
+       setLoggedInUser(user); setView('admin'); addLog('Otorisasi', 'Login Admin'); return true; 
+    }
+    
+    // PINTU BELAKANG (BACKDOOR) ANTI-GAGAL UNTUK DEVELOPER
+    if (username === 'dev' && password === 'dev') {
+       const devUser = { id: 'U0', username: 'dev', password: 'dev', name: 'Developer System', role: 'developer' };
+       setLoggedInUser(devUser); 
+       setView('admin'); 
+       addLog('Otorisasi', 'Bypass Login Developer (Backdoor)'); 
+       return true;
+    }
+    
+    return false;
+  };
+  const logout = () => { setLoggedInUser(null); setView('dashboard'); addLog('Otorisasi', 'Logout Admin'); };
+
+  const memberLogin = (username, password) => {
+    const memberList = db.members || [];
+    const member = memberList.find(m => m.username === username && m.password === password && m.status === 'approved');
+    if (member) { setLoggedInMember(member); setView('member_profile'); showToast(`Selamat datang, ${member.name}!`); return true; }
+    return false;
+  };
+  const memberLogout = () => { setLoggedInMember(null); setView('dashboard'); showToast('Berhasil keluar akun.'); };
+
+  const requireApproval = (actionType, payload, successMsg, isDestructive = false) => {
+    if (!loggedInUser) return false;
+    if (['developer', 'owner'].includes(loggedInUser.role) || (loggedInUser.role === 'manager' && actionType !== 'UPDATE_USER')) { 
+      executeAction(actionType, payload); showToast(successMsg); return true; 
+    }
+    const newApp = { id: `APP-${Date.now()}`, actionType, payload, requestedBy: loggedInUser.name, requesterRole: loggedInUser.role, date: new Date().toLocaleString() };
+    updateDb('approvals', [newApp, ...(db.approvals || [])]);
+    showToast('Tindakan butuh persetujuan Manager/Owner', 'info'); addLog('Persetujuan', `Mengajukan: ${actionType}`);
+    return false;
+  };
+
+  const executeAction = (actionType, payload) => {
+    let newDb = { ...db };
+    switch (actionType) {
+      case 'ADD_PRODUCT': newDb.products = [payload, ...newDb.products]; addLog('Inventaris', `Tambah: ${payload.name}`); break;
+      case 'EDIT_PRODUCT': newDb.products = newDb.products.map(p => p.id === payload.id ? payload : p); addLog('Inventaris', `Edit: ${payload.id}`); break;
+      case 'DELETE_PRODUCT': newDb.products = newDb.products.filter(p => p.id !== payload.id); addLog('Inventaris', `Hapus: ${payload.id}`); break;
+      case 'UPDATE_PRODUCT_STATUS': newDb.products = newDb.products.map(p => p.id === payload.id ? { ...p, status: payload.status } : p); break;
+      case 'ADD_CATEGORY': newDb.categories = [...newDb.categories, payload]; break;
+      case 'DELETE_CATEGORY': newDb.categories = newDb.categories.filter(c => c !== payload); break;
+      case 'UPDATE_ORDER': newDb.orders = newDb.orders.map(o => o.id === payload.id ? { ...o, status: payload.status, denda: payload.denda, totalRefundDeposit: payload.refund } : o); addLog('Pesanan', `Status ${payload.id} -> ${payload.status}`); break;
+      case 'REGISTER_MEMBER':
+        const newId = `MEM-${new Date().getFullYear().toString().slice(-2)}${String(db.members.length + 1).padStart(3, '0')}`;
+        newDb.members = [{ ...payload, id: newId, points: 0, status: 'approved', wishlist: [] }, ...newDb.members];
+        addLog('Member', `Setuju member: ${newId}`); break;
+      case 'UPDATE_USER': 
+        newDb.users = newDb.users.map(u => u.id === payload.userId ? { ...u, ...payload } : u);
+        if(loggedInUser?.id === payload.userId) setLoggedInUser(prev => ({...prev, ...payload})); break;
+      case 'ADD_PRIZE': newDb.prizes = [payload, ...newDb.prizes]; addLog('Hadiah', `Tambah: ${payload.name}`); break;
+      case 'DELETE_PRIZE': newDb.prizes = newDb.prizes.filter(p => p.id !== payload.id); addLog('Hadiah', `Hapus: ${payload.id}`); break;
+      case 'ADD_PROMO': newDb.promos = [payload, ...newDb.promos]; addLog('Promo', `Promo baru: ${payload.code}`); break;
+      case 'UPDATE_PROMO_STATUS': newDb.promos = newDb.promos.map(p => p.id === payload.id ? { ...p, status: payload.status } : p); addLog('Promo', `Status ${payload.code} -> ${payload.status}`); break;
+      case 'DELETE_PROMO': newDb.promos = newDb.promos.filter(p => p.id !== payload.id); addLog('Promo', `Hapus promo: ${payload.id}`); break;
+      default: break;
+    }
+    saveToDatabase(newDb);
+  };
+
+  const handleApproval = (id, action) => {
+    const req = db.approvals.find(a => a.id === id); if (!req) return;
+    if (action === 'approve') { executeAction(req.actionType, req.payload); showToast('Disetujui'); } else { showToast('Ditolak', 'info'); }
+    updateDb('approvals', db.approvals.filter(a => a.id !== id));
+  };
+
+  const getAvailableStock = (productId) => {
+    const product = db.products.find(p => p.id === productId); if (!product || product.status === 'Maintenance') return 0;
+    const rented = db.orders.filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status)).reduce((total, order) => {
+      const item = order.items.find(i => i.id === productId); return total + (item ? item.quantity : 0);
+    }, 0);
+    return product.totalStock - rented;
+  };
+
+  const toggleWishlist = (productId) => {
+    if (!loggedInMember) return showToast('Login member untuk menyimpan ke wishlist.', 'info');
+    const wishlist = loggedInMember.wishlist || [];
+    const isWished = wishlist.includes(productId);
+    const newWishlist = isWished ? wishlist.filter(id => id !== productId) : [...wishlist, productId];
+    
+    const updatedMember = { ...loggedInMember, wishlist: newWishlist };
+    setLoggedInMember(updatedMember);
+    const newMembers = db.members.map(m => m.id === updatedMember.id ? updatedMember : m);
+    updateDb('members', newMembers);
+    showToast(isWished ? 'Dihapus dari wishlist' : 'Tersimpan di wishlist!');
+  };
+
+  const processOrder = (formData, isWA = false) => {
+    const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const totalDeposit = cart.reduce((sum, item) => sum + ((item.deposit || 0) * item.quantity), 0);
+    const duration = formData.duration || 1;
+    const totalSewa = subtotal * duration;
+    const totalBiaya = totalSewa + totalDeposit; 
+    
+    const earnedPoints = loggedInMember ? Math.floor(totalSewa / 10000) : 0;
+    const newOrderId = `ORD-${2000 + db.orders.length + 1}`;
+
+    const newOrder = {
+      id: newOrderId, date: new Date().toISOString().split('T')[0],
+      customer: { name: formData.name, phone: formData.phone, identity: formData.identity, ktpUrl: formData.ktpUrl },
+      items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, deposit: c.deposit||0, quantity: c.quantity, images: c.images })),
+      duration, startDate: formData.startDate, endDate: formData.endDate,
+      totalSewa, totalDeposit, total: totalBiaya, status: 'Menunggu Konfirmasi',
+      memberId: loggedInMember?.id || null, earnedPoints, denda: 0
+    };
+    
+    let newDb = { ...db, orders: [newOrder, ...db.orders] };
+    
+    if (loggedInMember) {
+      const um = { ...loggedInMember, points: loggedInMember.points + earnedPoints };
+      setLoggedInMember(um);
+      newDb.members = newDb.members.map(m => m.id === um.id ? um : m);
+    }
+
+    saveToDatabase(newDb); setCart([]); setView('success'); addLog('Pelanggan', `Pesanan masuk: ${newOrder.id}`);
+
+    if (isWA) {
+      const waNumber = db.brandConfig.socialMedia.find(s => s.type === 'WhatsApp' || s.type === 'WA')?.value || '';
+      const text = `Halo Admin ${db.brandConfig.appName}, saya ingin menyewa pakaian.\n\n*ID Pesanan:* ${newOrderId}\n*Nama:* ${formData.name}\n*Tgl Sewa:* ${formData.startDate} (${duration} Hari)\n\n*Total Biaya (Inc. Deposit):* ${formatRupiah(totalBiaya)}\n\nMohon konfirmasinya. Terima kasih!`;
+      window.open(`https://wa.me/${waNumber.replace(/\D/g,'')}?text=${encodeURIComponent(text)}`, '_blank');
+    }
+  };
+
+  const printInvoice = (order) => {
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+      <html><head><title>Invoice ${order.id}</title>
+      <style>
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px; color: #333; }
+        .header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; }
+        .title { font-size: 24px; font-weight: bold; margin: 0; color: #000; }
+        .row { display: flex; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px solid #fafafa; padding-bottom: 10px; }
+        .total { font-size: 18px; font-weight: bold; border-top: 2px solid #333; padding-top: 15px; margin-top: 15px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+      </style></head><body>
+      <div class="header">
+        <h1 class="title">${db.brandConfig.appName}</h1>
+        <p>INVOICE PENYEWAAN</p>
+      </div>
+      <div class="row"><span>ID Pesanan:</span> <strong>${order.id}</strong></div>
+      <div class="row"><span>Pelanggan:</span> <strong>${order.customer.name} (${order.customer.phone})</strong></div>
+      <div class="row"><span>Tanggal Sewa:</span> <strong>${order.startDate} s/d ${order.endDate} (${order.duration} Hari)</strong></div>
+      
+      <table>
+        <tr><th>Barang</th><th>Qty</th><th>Harga/Hr</th><th>Deposit</th></tr>
+        ${order.items.map(i => `<tr><td>${i.name}</td><td>${i.quantity}</td><td>${formatRupiah(i.price)}</td><td>${formatRupiah(i.deposit)}</td></tr>`).join('')}
+      </table>
+      
+      <div class="row"><span>Total Biaya Sewa:</span> <span>${formatRupiah(order.totalSewa)}</span></div>
+      <div class="row"><span>Total Uang Jaminan (Deposit):</span> <span>${formatRupiah(order.totalDeposit)}</span></div>
+      <div class="row total"><span>TOTAL KESELURUHAN:</span> <span>${formatRupiah(order.total)}</span></div>
+      ${order.status === 'Selesai' ? `<div class="row"><span>Denda Keterlambatan/Kerusakan:</span> <span style="color:red">-${formatRupiah(order.denda)}</span></div>
+      <div class="row total"><span>DEPOSIT DIKEMBALIKAN:</span> <span>${formatRupiah(order.totalRefundDeposit)}</span></div>` : ''}
+      
+      <div style="margin-top: 50px; text-align: center; font-size: 12px; color: #888;">
+        Terima kasih telah mempercayakan momen spesial Anda pada ${db.brandConfig.appName}.<br/>
+        Barang sewaan wajib dikembalikan tepat waktu untuk menghindari denda.
+      </div>
+      <script>window.print(); window.onafterprint = function(){ window.close(); }</script>
+      </body></html>
+    `);
+    printWindow.document.close();
+  };
+
+  const submitMemberRegistration = (formData) => {
+    const newApp = { id: `APP-${Date.now()}`, actionType: 'REGISTER_MEMBER', payload: formData, requestedBy: formData.name, requesterRole: 'Calon Member', date: new Date().toLocaleString() };
+    updateDb('approvals', [newApp, ...(db.approvals || [])]);
+    showToast('Pendaftaran diajukan. Menunggu persetujuan Admin.', 'info');
+  };
+
+  const redeemPrize = (prize) => {
+    if (!loggedInMember) return;
+    if (loggedInMember.points >= prize.points) {
+      const updatedMember = { ...loggedInMember, points: loggedInMember.points - prize.points };
+      setLoggedInMember(updatedMember);
+      const newMembers = db.members.map(m => m.id === updatedMember.id ? updatedMember : m);
+      updateDb('members', newMembers);
+      addLog('Hadiah', `Tukar poin dengan: ${prize.name}`, updatedMember.name);
+      showToast(`Berhasil menukar poin dengan ${prize.name}!`, 'success');
+    } else {
+      showToast('Poin Anda tidak mencukupi.', 'error');
+    }
+  };
+
+  const value = {
+    db, setDb, isDbLoading, saveStatus, updateDb, saveToDatabase, showToast,
+    view, setView, cart, setCart, loggedInUser, loggedInMember, cTheme,
+    login, logout, memberLogin, memberLogout, submitMemberRegistration, redeemPrize,
+    getAvailableStock, toggleWishlist, uploadImageToServer, compressImage,
+    addToCart: (p) => { setCart([...cart, { ...p, quantity: 1 }]); showToast(`${p.name} masuk keranjang.`); },
+    removeFromCart: (id) => setCart(cart.filter(i => i.id !== id)),
+    updateCartQuantity: (id, d) => setCart(cart.map(i => i.id === id && i.quantity + d > 0 ? { ...i, quantity: i.quantity + d } : i)),
+    processOrder, requireApproval, handleApproval, printInvoice,
+    exportData: () => {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(db));
+      const dl = document.createElement('a'); dl.href = dataStr; dl.download = `aisya_backup_${Date.now()}.json`; dl.click();
+    },
+    importData: (json) => { try { setDb(JSON.parse(json)); showToast('Restore sukses!'); } catch(e) { showToast('Gagal parse JSON', 'error'); } }
+  };
+
+  return <AppStateContext.Provider value={value}>{toast && <Toast {...toast} onClose={() => setToast(null)} />}{children}</AppStateContext.Provider>;
+};
+
+const SplashScreen = () => {
+  return (
+    <div className="fixed inset-0 bg-stone-900 flex flex-col items-center justify-center z-[9999]">
+      <div className="w-24 h-24 bg-white/10 rounded-full flex items-center justify-center mb-6 animate-pulse">
+        <Package className="w-12 h-12 text-rose-400" />
+      </div>
+      <h1 className="text-3xl font-serif font-bold text-white tracking-widest uppercase mb-2 animate-fade-in-down">Aisya Wardrobe</h1>
+      <p className="text-stone-400 text-sm tracking-wide">Sinkronisasi Database Firebase...</p>
+      <div className="mt-8 w-48 h-1 bg-stone-800 rounded-full overflow-hidden">
+        <div className="h-full bg-rose-500 w-1/2 animate-[spin_2s_linear_infinite]" style={{ animationName: 'loadingBar', animationDuration: '1.5s', animationIterationCount: 'infinite' }}></div>
+      </div>
+      <style>{`@keyframes loadingBar { 0% { width: 0%; transform: translateX(-100%); } 100% { width: 100%; transform: translateX(200%); } }`}</style>
+    </div>
+  );
+};
+
+const CustomerLayout = ({ children }) => {
+  const { view, setView, cart, db, cTheme, loggedInUser, loggedInMember } = useContext(AppStateContext);
+  const [showNav, setShowNav] = useState(false);
+  const [showAdminMenu, setShowAdminMenu] = useState(false);
+  const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
+
+  return (
+    <div className="min-h-screen bg-stone-50 font-sans pb-10">
+      <header className="bg-white/90 backdrop-blur-md shadow-sm sticky top-0 z-40 border-b border-stone-200">
+        <div className="max-w-6xl mx-auto px-4 py-3 h-16 flex items-center justify-between">
+          <button onClick={() => setShowNav(true)} className="md:hidden p-2 text-stone-600"><Menu className="w-6 h-6"/></button>
+          
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView('dashboard')}>
+            {db.brandConfig.logoUrl ? <img src={db.brandConfig.logoUrl} className="h-8 object-contain" alt="Logo"/> : 
+             db.brandConfig.appIcon ? <span className="text-3xl">{db.brandConfig.appIcon}</span> : <Package className={`w-8 h-8 ${cTheme.text}`} />}
+            <span className="text-2xl font-serif font-bold text-stone-900 tracking-wide hidden sm:block uppercase">{db.brandConfig.appName}</span>
+          </div>
+
+          <nav className="hidden md:flex gap-6 absolute left-1/2 transform -translate-x-1/2">
+            <button onClick={() => setView('dashboard')} className={`font-bold transition-colors ${view==='dashboard'?cTheme.text:'text-stone-500 hover:text-stone-900'}`}>Beranda</button>
+            <button onClick={() => setView('catalog')} className={`font-bold transition-colors ${view==='catalog'?cTheme.text:'text-stone-500 hover:text-stone-900'}`}>Katalog</button>
+          </nav>
+
+          <div className="flex items-center gap-2 relative">
+            <button onClick={() => loggedInMember ? setView('member_profile') : setView('member_auth')} className={`p-2.5 rounded-full transition-all hover:bg-stone-100 ${loggedInMember ? cTheme.text : 'text-stone-600'}`}>
+              {loggedInMember?.photoUrl ? <img src={loggedInMember.photoUrl} className="w-8 h-8 rounded-full object-cover border" alt="Member"/> : <User className="w-6 h-6" />}
+            </button>
+            <button onClick={() => setView('cart')} className="p-2.5 rounded-full relative hover:bg-stone-100 text-stone-600">
+              <ShoppingCart className="w-6 h-6" />
+              {cartCount > 0 && <span className={`absolute top-0 right-0 ${cTheme.bg} text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center font-bold border-2 border-white`}>{cartCount}</span>}
+            </button>
+            
+            <button onClick={() => setShowAdminMenu(!showAdminMenu)} className="p-2.5 rounded-full transition-colors text-stone-500 hover:text-stone-800 hover:bg-stone-100" title="Menu Lainnya">
+              <MoreVertical className="w-6 h-6" />
+            </button>
+
+            {showAdminMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowAdminMenu(false)}></div>
+                <div className="absolute top-12 right-0 mt-2 w-48 bg-white rounded-2xl shadow-xl border border-stone-100 z-50 overflow-hidden animate-fade-in-down">
+                  <button onClick={() => { setView('dashboard'); setShowAdminMenu(false); }} className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-bold text-stone-700 hover:bg-stone-50 border-b border-stone-50">
+                    <Home className="w-4 h-4 text-stone-500" /> Beranda
+                  </button>
+                  <button onClick={() => { setView('admin'); setShowAdminMenu(false); }} className={`w-full flex items-center gap-3 px-4 py-3.5 text-sm font-bold transition-colors ${loggedInUser ? `${cTheme.light} ${cTheme.text}` : 'text-stone-700 hover:bg-stone-50'}`}>
+                    <Shield className={`w-4 h-4 ${loggedInUser ? cTheme.text : 'text-stone-500'}`} /> Admin Panel
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {showNav && (
+        <div className="fixed inset-0 z-50 bg-stone-900/50 backdrop-blur-sm md:hidden flex justify-end" onClick={() => setShowNav(false)}>
+          <div className="w-[80vw] max-w-sm bg-white h-full p-6 shadow-2xl animate-fade-in-down" onClick={e=>e.stopPropagation()}>
+            <button onClick={() => setShowNav(false)} className="mb-8 p-2 bg-stone-100 rounded-full hover:bg-rose-100 hover:text-rose-600 transition-colors"><X className="w-5 h-5"/></button>
+            <div className="space-y-6 flex flex-col">
+              <button onClick={() => {setView('dashboard'); setShowNav(false)}} className="flex items-center gap-4 font-bold text-stone-700 text-lg hover:text-rose-600"><Home/> Beranda</button>
+              <button onClick={() => {setView('catalog'); setShowNav(false)}} className="flex items-center gap-4 font-bold text-stone-700 text-lg hover:text-rose-600"><Package/> Katalog</button>
+              <button onClick={() => {loggedInMember ? setView('member_profile') : setView('member_auth'); setShowNav(false)}} className="flex items-center gap-4 font-bold text-stone-700 text-lg hover:text-rose-600"><User/> {loggedInMember ? 'Profil Member' : 'Akun Member'}</button>
+              <div className="mt-auto pt-8 border-t border-stone-200">
+                <button onClick={() => {setView('admin'); setShowNav(false)}} className="flex items-center gap-4 font-bold text-stone-500 hover:text-rose-600"><Shield/> Admin System</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <main className="max-w-6xl mx-auto px-4 py-8">{children}</main>
+
+      <footer className="bg-stone-900 text-stone-400 py-12 mt-12 border-t-4 border-rose-600">
+        <div className="max-w-6xl mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-10">
+          <div>
+            <div className="flex items-center gap-3 mb-6 cursor-pointer" onClick={() => setView('dashboard')}>
+               {db.brandConfig.logoUrl ? <img src={db.brandConfig.logoUrl} alt="Logo" className="h-8 object-contain brightness-0 invert" /> : <Package className={`w-8 h-8 text-rose-500`} />}
+               <span className="text-2xl font-serif font-bold text-white tracking-wider uppercase">{db.brandConfig.appName}</span>
+            </div>
+            <p className="text-sm leading-relaxed pr-4 font-light text-stone-400">{db.brandConfig.companyBio}</p>
+          </div>
+          <div>
+            <h4 className="text-white font-serif tracking-wide text-lg mb-6">Layanan Kami</h4>
+            <ul className="space-y-3 text-sm">
+              <li><button onClick={() => setView('catalog')} className="hover:text-rose-400 transition-colors flex items-center gap-2"><ChevronRight className="w-3 h-3"/> Katalog Pakaian</button></li>
+              <li><button onClick={() => setView('member_auth')} className="hover:text-rose-400 transition-colors flex items-center gap-2"><ChevronRight className="w-3 h-3"/> Pendaftaran Member</button></li>
+            </ul>
+          </div>
+          <div>
+            <h4 className="text-white font-serif tracking-wide text-lg mb-6">Hubungi Kami</h4>
+            <ul className="space-y-4 text-sm text-stone-400">
+              <li className="flex items-center gap-3"><div className="w-8 h-8 rounded-full bg-stone-800 flex items-center justify-center text-stone-300"><FileText className="w-4 h-4"/></div> {db.brandConfig.companyEmail}</li>
+              {db.brandConfig.socialMedia.map((soc, idx) => (
+                <li key={`ft-soc-${idx}`} className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-stone-800 flex items-center justify-center text-stone-300"><span className="font-bold text-xs uppercase">{soc.type.charAt(0)}</span></div>
+                  <span className="font-medium text-stone-300">{soc.type}:</span> {soc.value}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+        <div className="max-w-6xl mx-auto px-4 mt-12 pt-8 border-t border-stone-800 flex flex-col md:flex-row justify-between items-center gap-4 text-xs">
+          <p>&copy; {new Date().getFullYear()} {db.brandConfig.appName}. Hak Cipta Dilindungi.</p>
+          <div className="flex gap-6"><span className="cursor-pointer hover:text-white">Syarat & Ketentuan</span><span className="cursor-pointer hover:text-white">Kebijakan Privasi</span></div>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+const DashboardView = () => {
+  const { setView, db, cTheme } = useContext(AppStateContext);
+  return (
+    <div className="space-y-8 animate-fade-in-down">
+      <div className={`${cTheme.bg} rounded-[2.5rem] p-10 md:p-16 text-white shadow-2xl relative overflow-hidden`}>
+        <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full blur-3xl -mr-20 -mt-20"></div>
+        <div className="relative z-10 max-w-2xl">
+          <h1 className="text-4xl md:text-6xl font-serif font-bold mb-6 leading-tight uppercase">{db.brandConfig.appName}</h1>
+          <p className="text-lg md:text-xl text-white/90 mb-10">{db.brandConfig.slogan}</p>
+          <div className="flex flex-wrap gap-4">
+             <button onClick={() => setView('catalog')} className="bg-white text-stone-900 px-8 py-4 rounded-full font-bold hover:scale-105 transition-all shadow-xl flex items-center gap-2">Sewa Sekarang <ChevronRight className="w-5 h-5"/></button>
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center group hover:shadow-md transition-all">
+          <div className={`${cTheme.light} p-4 rounded-2xl mb-4 group-hover:scale-110 transition-transform`}><Package className="w-8 h-8"/></div>
+          <h3 className="font-bold text-stone-800 text-lg mb-2">Kualitas Premium</h3><p className="text-sm text-stone-500">Terawat dan higienis.</p>
+        </div>
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center group hover:shadow-md transition-all">
+          <div className={`${cTheme.light} p-4 rounded-2xl mb-4 group-hover:scale-110 transition-transform`}><Shield className="w-8 h-8"/></div>
+          <h3 className="font-bold text-stone-800 text-lg mb-2">Aman & Terpercaya</h3><p className="text-sm text-stone-500">Sistem deposit transparan.</p>
+        </div>
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center group hover:shadow-md transition-all">
+          <div className={`${cTheme.light} p-4 rounded-2xl mb-4 group-hover:scale-110 transition-transform`}><Award className="w-8 h-8"/></div>
+          <h3 className="font-bold text-stone-800 text-lg mb-2">Poin Reward Member</h3><p className="text-sm text-stone-500">Sewa dan kumpulkan poin hadiah.</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const CatalogView = () => {
+  const { db, cart, addToCart, getAvailableStock, cTheme, loggedInMember, toggleWishlist } = useContext(AppStateContext);
+  const [activeCategory, setActiveCategory] = useState('Semua');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredProducts = db.products.filter(p => 
+    p.status !== 'Maintenance' && 
+    (activeCategory === 'Semua' || p.category === activeCategory) &&
+    (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  return (
+    <div className="animate-fade-in-down">
+      <div className="relative mb-6">
+        <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
+        <input type="text" className="w-full pl-14 pr-6 py-4 border border-stone-200 rounded-full bg-white focus:outline-none focus:ring-2 focus:ring-rose-200 text-[16px] shadow-sm transition-all" placeholder="Cari nama atau ID pakaian..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+      </div>
+      <div className="flex overflow-x-auto pb-4 mb-6 gap-3 no-scrollbar">
+        <button onClick={() => setActiveCategory('Semua')} className={`px-6 py-2.5 rounded-full font-bold transition-all whitespace-nowrap ${activeCategory === 'Semua' ? 'bg-stone-900 text-white shadow-md' : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-50'}`}>Semua Koleksi</button>
+        {db.categories.map(cat => (
+          <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-6 py-2.5 rounded-full font-bold transition-all whitespace-nowrap ${activeCategory === cat ? `${cTheme.bg} text-white shadow-md` : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-50'}`}>{cat}</button>
+        ))}
+      </div>
+      
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {filteredProducts.map(product => {
+          const avail = getAvailableStock(product.id);
+          const inCart = cart.find(i => i.id === product.id)?.quantity || 0;
+          const canAdd = avail > inCart;
+          const isWished = loggedInMember?.wishlist?.includes(product.id);
+
+          return (
+            <div key={product.id} className="bg-white rounded-2xl shadow-sm border border-stone-100 overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col group relative">
+              <button onClick={() => toggleWishlist(product.id)} className="absolute top-4 left-4 z-10 p-2 bg-white/90 backdrop-blur rounded-full shadow-md hover:scale-110 transition-transform">
+                <Heart className={`w-5 h-5 ${isWished ? 'fill-rose-500 text-rose-500' : 'text-stone-400'}`} />
+              </button>
+
+              <div className="h-64 overflow-hidden relative bg-stone-100">
+                <img src={product.images?.[0] || 'https://placehold.co/400?text=No+Image'} alt={product.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+                <div className="absolute top-4 right-4 bg-white/90 backdrop-blur px-3 py-1.5 rounded-full text-xs font-bold text-stone-800 uppercase tracking-wider">{product.category}</div>
+                {avail === 0 && <div className="absolute inset-0 bg-stone-900/60 backdrop-blur-sm flex items-center justify-center"><span className="bg-red-600 text-white px-6 py-2.5 rounded-full font-bold uppercase tracking-wider">Stok Habis</span></div>}
+              </div>
+              <div className="p-6 flex flex-col flex-grow">
+                <h3 className="font-serif font-bold text-xl text-stone-900 mb-1 leading-tight group-hover:text-rose-600 transition-colors">{product.name}</h3>
+                <p className="text-[10px] text-stone-400 font-mono bg-stone-50 px-2 py-1 rounded w-max mb-4">{product.id}</p>
+                <div className="mb-4">
+                  <p className={`${cTheme.text} font-bold text-xl`}>{formatRupiah(product.price)} <span className="text-sm font-light text-stone-500">/ hari</span></p>
+                  {product.deposit > 0 && <p className="text-xs font-bold text-amber-600 bg-amber-50 inline-block px-2 py-1 rounded mt-2">+ Deposit: {formatRupiah(product.deposit)}</p>}
+                </div>
+                
+                {product.productLink && (
+                  <a href={product.productLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg mb-4 w-max transition-colors">
+                    <ExternalLink className="w-3 h-3"/> Lihat Referensi Eksternal
+                  </a>
+                )}
+                
+                <p className="text-sm text-stone-500 mb-6 line-clamp-2 font-light flex-grow">{product.desc}</p>
+                <div className="mt-auto pt-5 border-t border-stone-100 flex items-center justify-between">
+                  <span className="text-sm text-stone-500 font-medium">Sisa: {avail}</span>
+                  <button onClick={() => addToCart(product)} disabled={!canAdd} className={`px-5 py-2.5 rounded-full font-bold transition-all active:scale-95 flex items-center gap-2 ${canAdd ? `${cTheme.bg} text-white shadow-md hover:shadow-lg` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}><ShoppingCart className="w-4 h-4" /> Sewa</button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const CartView = () => {
+  const { cart, removeFromCart, updateCartQuantity, setView, getAvailableStock, cTheme } = useContext(AppStateContext);
+  const subtotalSewa = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const subtotalDeposit = cart.reduce((sum, item) => sum + ((item.deposit||0) * item.quantity), 0);
+
+  if (cart.length === 0) return (
+    <div className="bg-white rounded-3xl shadow-sm border border-stone-100 p-16 text-center max-w-2xl mx-auto mt-10">
+      <ShoppingCart className="w-20 h-20 text-stone-200 mx-auto mb-6" />
+      <h2 className="text-2xl font-serif font-bold text-stone-800 mb-4">Keranjang Kosong</h2>
+      <button onClick={() => setView('catalog')} className={`px-10 py-4 rounded-full font-bold shadow-lg transition-all ${cTheme.bg} text-white`}>Eksplorasi Katalog</button>
+    </div>
+  );
+
+  return (
+    <div className="max-w-5xl mx-auto animate-fade-in-down">
+      <h1 className="text-3xl font-serif font-bold text-stone-800 mb-8">Keranjang Sewa</h1>
+      <div className="flex flex-col lg:flex-row gap-8">
+        <div className="flex-grow space-y-5">
+          {cart.map(item => {
+            const avail = getAvailableStock(item.id);
+            return (
+              <div key={item.id} className="bg-white p-5 rounded-2xl shadow-sm border border-stone-100 flex flex-col sm:flex-row gap-5">
+                <img src={item.images?.[0]} alt={item.name} className="w-full sm:w-32 h-48 sm:h-32 object-cover rounded-xl bg-stone-100" />
+                <div className="flex-grow flex flex-col justify-center">
+                  <h3 className="font-bold font-serif text-lg text-stone-900 mb-1">{item.name}</h3>
+                  <div className="mb-4">
+                    <p className={`${cTheme.text} font-bold text-lg`}>{formatRupiah(item.price)} <span className="text-xs text-stone-500 font-normal">/ hari</span></p>
+                    {item.deposit > 0 && <p className="text-xs text-amber-600 font-bold mt-1">Uang Jaminan: {formatRupiah(item.deposit)}</p>}
+                  </div>
+                  <div className="flex items-center justify-between sm:justify-start gap-5">
+                    <div className="flex items-center border border-stone-200 rounded-full overflow-hidden h-10 bg-stone-50">
+                      <button onClick={() => updateCartQuantity(item.id, -1)} className="px-4 h-full hover:bg-stone-200 font-bold text-stone-600">-</button>
+                      <span className="w-10 text-center font-bold text-stone-800">{item.quantity}</span>
+                      <button onClick={() => updateCartQuantity(item.id, 1)} disabled={item.quantity >= avail} className="px-4 h-full hover:bg-stone-200 font-bold text-stone-600 disabled:opacity-30">+</button>
+                    </div>
+                    <button onClick={() => removeFromCart(item.id)} className="p-2.5 text-red-500 hover:bg-red-50 rounded-full transition-colors"><Trash2 className="w-5 h-5" /></button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="w-full lg:w-96 flex-shrink-0">
+          <div className="bg-stone-900 text-white p-8 rounded-3xl shadow-xl sticky top-24">
+            <h3 className="font-serif font-bold text-xl mb-6 border-b border-stone-700 pb-4">Ringkasan</h3>
+            <div className="space-y-4 mb-8 text-sm">
+              <div className="flex justify-between text-stone-300"><span>Total Produk</span><span className="font-bold text-white">{cart.reduce((s, i) => s + i.quantity, 0)} Pcs</span></div>
+              <div className="flex justify-between text-stone-300"><span>Subtotal Sewa/Hari</span><span className="font-bold text-white">{formatRupiah(subtotalSewa)}</span></div>
+              <div className="flex justify-between text-amber-400"><span>Total Deposit (Dikembalikan)</span><span className="font-bold">{formatRupiah(subtotalDeposit)}</span></div>
+            </div>
+            <button onClick={() => setView('checkout')} className={`w-full ${cTheme.bg} text-white py-4 rounded-full font-bold shadow-lg hover:brightness-110 transition-all text-lg`}>Lanjut Checkout</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const CheckoutView = () => {
+  const { cart, processOrder, setView, cTheme, loggedInMember, compressImage, uploadImageToServer } = useContext(AppStateContext);
+  const [formData, setFormData] = useState({ name: loggedInMember?.name||'', identity: loggedInMember?.identity||'', phone: loggedInMember?.phone||'', address: loggedInMember?.address||'', startDate: '', endDate: '', ktpUrl: loggedInMember?.ktpUrl||null });
+  const [isUploading, setIsUploading] = useState(false);
+
+  const getDuration = () => {
+    if(!formData.startDate || !formData.endDate) return 1;
+    const start = new Date(formData.startDate); const end = new Date(formData.endDate);
+    const diff = Math.ceil((end - start) / (1000*60*60*24)) + 1; return diff > 0 ? diff : 1;
+  };
+  
+  const duration = getDuration();
+  const subtotalSewa = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0) * duration;
+  const totalDeposit = cart.reduce((sum, item) => sum + ((item.deposit||0) * item.quantity), 0);
+  const totalBiaya = subtotalSewa + totalDeposit;
+
+  const handleKtpUpload = async (e) => { 
+    const file = e.target.files[0]; 
+    if (!file) return;
+    setIsUploading(true);
+    const compressed = await compressImage(file);
+    const url = await uploadImageToServer(compressed);
+    setFormData(p => ({...p, ktpUrl: url})); 
+    setIsUploading(false);
+  };
+  
+  const handleSubmit = (e, isWA = false) => { 
+    e.preventDefault(); 
+    if(new Date(formData.endDate) < new Date(formData.startDate)) return alert("Tanggal akhir tidak valid!"); 
+    processOrder({...formData, duration}, isWA); 
+  };
+
+  return (
+    <div className="max-w-5xl mx-auto animate-fade-in-down">
+      <div className="flex items-center gap-4 mb-8">
+        <button onClick={() => setView('cart')} className="w-10 h-10 bg-white rounded-full flex items-center justify-center border border-stone-200 shadow-sm hover:bg-stone-50"><ChevronLeft className="w-6 h-6"/></button>
+        <h1 className="text-3xl font-serif font-bold text-stone-900">Checkout Penyewaan</h1>
+      </div>
+
+      <div className="flex flex-col lg:flex-row gap-8">
+        <form id="co-form" onSubmit={(e)=>handleSubmit(e, false)} className="flex-grow bg-white p-8 rounded-3xl shadow-sm border border-stone-200 space-y-8">
+          <section>
+            <h2 className="font-bold text-xl text-stone-800 mb-6 border-b border-stone-100 pb-3 flex items-center gap-2"><User className="w-6 h-6 text-stone-400"/> Data Penyewa (Sesuai KTP)</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">Nama Lengkap</label><input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px] transition-colors" /></div>
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">NIK KTP</label><input required type="number" value={formData.identity} onChange={e => setFormData({...formData, identity: e.target.value})} className="w-full px-5 py-3.5 bg-stone-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px] transition-colors" /></div>
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">WhatsApp</label><input required type="tel" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px] transition-colors" /></div>
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">Upload KTP</label><label className="flex items-center gap-3 bg-stone-50 border border-stone-200 px-5 py-3.5 rounded-xl cursor-pointer hover:bg-stone-100 text-sm font-bold text-stone-600"><Upload className="w-5 h-5" /> <span className="truncate">{isUploading ? 'Uploading...' : formData.ktpUrl ? 'KTP OK' : 'Upload File'}</span><input required={!formData.ktpUrl} type="file" accept="image/*" onChange={handleKtpUpload} className="hidden" /></label></div>
+              <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Alamat Domisili</label><textarea required rows="2" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px]"></textarea></div>
+            </div>
+          </section>
+
+          <section>
+            <h2 className="font-bold text-xl text-stone-800 mb-6 border-b border-stone-100 pb-3 flex items-center gap-2"><CalendarIcon className="w-6 h-6 text-stone-400"/> Rencana Sewa</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">Tgl Mulai (Ambil)</label><input required type="date" min={new Date().toISOString().split('T')[0]} value={formData.startDate} onChange={e => setFormData({...formData, startDate: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px]" /></div>
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">Tgl Akhir (Kembali)</label><input required type="date" min={formData.startDate || new Date().toISOString().split('T')[0]} value={formData.endDate} onChange={e => setFormData({...formData, endDate: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px]" /></div>
+            </div>
+          </section>
+        </form>
+
+        <div className="w-full lg:w-96 flex-shrink-0 space-y-6">
+          <div className="bg-stone-900 p-8 rounded-3xl shadow-xl text-white sticky top-24">
+            <h3 className="font-bold font-serif text-xl mb-6 border-b border-stone-700 pb-4">Tagihan Final</h3>
+            <div className="space-y-4 mb-8">
+              <div className="flex justify-between text-stone-400 text-sm"><span>Sewa ({duration} Hari)</span><span className="font-bold text-white">{formatRupiah(subtotalSewa)}</span></div>
+              <div className="flex justify-between text-amber-500 text-sm border-b border-stone-700 pb-4"><span>Deposit Jaminan</span><span className="font-bold">{formatRupiah(totalDeposit)}</span></div>
+              <div className="flex justify-between items-end pt-2">
+                <span className="font-bold text-stone-300">Total Biaya</span>
+                <span className={`font-bold text-2xl ${cTheme.text}`}>{formatRupiah(totalBiaya)}</span>
+              </div>
+            </div>
+
+            {loggedInMember ? (
+              <button type="button" onClick={(e)=>handleSubmit(e, true)} className="w-full bg-green-500 text-white py-4 rounded-xl font-bold text-lg hover:bg-green-600 shadow-lg active:scale-95 flex justify-center items-center gap-2 mb-3"><MessageCircle className="w-6 h-6"/> Pesan via WhatsApp</button>
+            ) : (
+              <button form="co-form" type="submit" className={`w-full ${cTheme.bg} text-white py-4 rounded-xl font-bold text-lg hover:brightness-110 shadow-lg active:scale-95 mb-3`}>Kirim Pesanan</button>
+            )}
+            
+            <div className="text-center text-xs text-stone-500 mt-4">
+               *Uang Deposit akan dikembalikan penuh jika barang kembali tanpa cacat/telat.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SuccessView = () => {
+  const { setView } = useContext(AppStateContext);
+  return (
+    <div className="bg-white rounded-3xl shadow-sm border border-stone-200 p-12 text-center max-w-2xl mx-auto mt-10 animate-fade-in-down">
+      <div className="w-24 h-24 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-6"><CheckCircle className="w-12 h-12 text-green-500" /></div>
+      <h2 className="text-3xl font-serif font-bold text-stone-900 mb-3">Pesanan Diterima!</h2>
+      <p className="text-stone-500 mb-8 text-lg">Tunggu konfirmasi admin kami atau kunjungi butik pada tanggal yang ditentukan.</p>
+      <button onClick={() => setView('dashboard')} className="bg-stone-900 text-white px-10 py-4 rounded-full font-bold text-lg hover:bg-black transition-colors shadow-lg active:scale-95">Selesai</button>
+    </div>
+  );
+};
+
+const MemberAuthView = () => {
+  const { memberLogin, submitMemberRegistration, cTheme, showToast, compressImage, uploadImageToServer } = useContext(AppStateContext);
+  const [tab, setTab] = useState('login');
+  const [uname, setUname] = useState(''); const [pwd, setPwd] = useState('');
+  const [formData, setFormData] = useState({ username: '', password: '', name: '', identity: '', phone: '', birthPlace: '', birthDate: '', gender: 'Perempuan', address: '', email: '', socialMedia: '', photoUrl: null, ktpUrl: null });
+  const [isUploading, setIsUploading] = useState({ photoUrl: false, ktpUrl: false });
+
+  const handleLogin = (e) => { e.preventDefault(); if(!memberLogin(uname, pwd)) showToast('Akun tidak ditemukan atau belum disetujui!', 'error'); };
+  const handleRegister = (e) => { e.preventDefault(); submitMemberRegistration(formData); setTab('login'); };
+  
+  const handlePhotoUpload = async (e, type) => {
+    const file = e.target.files[0];
+    if (file) {
+      setIsUploading(prev => ({ ...prev, [type]: true }));
+      showToast(`Mengunggah gambar...`, 'info');
+      const compressed = await compressImage(file);
+      const serverUrl = await uploadImageToServer(compressed);
+      setFormData(prev => ({ ...prev, [type]: serverUrl }));
+      showToast(`Gambar OK`, 'success');
+      setIsUploading(prev => ({ ...prev, [type]: false }));
+    }
+  };
+
+  return (
+    <div className="max-w-xl mx-auto animate-fade-in-down">
+      <div className="bg-white rounded-3xl shadow-xl border border-stone-100 overflow-hidden">
+        <div className="flex border-b border-stone-100 bg-stone-50">
+          <button onClick={() => setTab('login')} className={`flex-1 py-5 font-bold text-sm uppercase tracking-wider ${tab === 'login' ? `${cTheme.text} bg-white border-b-2 ${cTheme.border}` : 'text-stone-400'}`}>Masuk</button>
+          <button onClick={() => setTab('register')} className={`flex-1 py-5 font-bold text-sm uppercase tracking-wider ${tab === 'register' ? `${cTheme.text} bg-white border-b-2 ${cTheme.border}` : 'text-stone-400'}`}>Daftar</button>
+        </div>
+        
+        <div className="p-8 md:p-10">
+          {tab === 'login' ? (
+            <form onSubmit={handleLogin} className="space-y-6">
+              <div className="text-center mb-8"><User className={`w-16 h-16 mx-auto mb-4 ${cTheme.text}`}/><h2 className="text-2xl font-serif font-bold text-stone-800">Login Member</h2></div>
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">Username</label><input required type="text" value={uname} onChange={e=>setUname(e.target.value)} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px]" /></div>
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">Password</label><input required type="password" value={pwd} onChange={e=>setPwd(e.target.value)} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px]" /></div>
+              <button type="submit" className={`w-full ${cTheme.bg} text-white py-4 rounded-full font-bold shadow-lg mt-4 text-lg`}>Masuk</button>
+            </form>
+          ) : (
+            <form onSubmit={handleRegister} className="space-y-5">
+               <h2 className="font-bold text-xl text-stone-800 border-b pb-4">Data Member Baru</h2>
+               <div className="flex gap-4">
+                  <label className="flex-1 flex flex-col items-center p-4 border-2 border-dashed border-stone-300 rounded-2xl cursor-pointer hover:bg-stone-50 text-sm font-bold text-stone-600 bg-white"><UserPlus className="w-6 h-6 mb-2 text-stone-400" /> {isUploading.photoUrl ? 'Uploading...' : formData.photoUrl ? 'Foto OK' : 'Foto Diri'}<input required={!formData.photoUrl} type="file" accept="image/*" className="hidden" onChange={e => handlePhotoUpload(e, 'photoUrl')} /></label>
+                  <label className="flex-1 flex flex-col items-center p-4 border-2 border-dashed border-stone-300 rounded-2xl cursor-pointer hover:bg-stone-50 text-sm font-bold text-stone-600 bg-white"><Upload className="w-6 h-6 mb-2 text-stone-400" /> {isUploading.ktpUrl ? 'Uploading...' : formData.ktpUrl ? 'KTP OK' : 'Foto KTP'}<input required={!formData.ktpUrl} type="file" accept="image/*" className="hidden" onChange={e => handlePhotoUpload(e, 'ktpUrl')} /></label>
+               </div>
+               <div><label className="block text-xs font-bold text-stone-600 mb-1">Username (Login)</label><input required type="text" value={formData.username} onChange={e=>setFormData({...formData, username: e.target.value})} className="w-full px-4 py-2.5 bg-stone-50 border rounded-lg text-sm outline-none focus:border-rose-500" /></div>
+               <div><label className="block text-xs font-bold text-stone-600 mb-1">Password</label><input required type="password" value={formData.password} onChange={e=>setFormData({...formData, password: e.target.value})} className="w-full px-4 py-2.5 bg-stone-50 border rounded-lg text-sm outline-none focus:border-rose-500" /></div>
+               <div><label className="block text-xs font-bold text-stone-600 mb-1">Nama Sesuai KTP</label><input required type="text" value={formData.name} onChange={e=>setFormData({...formData, name: e.target.value})} className="w-full px-4 py-2.5 bg-stone-50 border rounded-lg text-sm outline-none focus:border-rose-500" /></div>
+               <div><label className="block text-xs font-bold text-stone-600 mb-1">NIK & WhatsApp</label><div className="flex gap-2"><input required type="number" placeholder="NIK" value={formData.identity} onChange={e=>setFormData({...formData, identity: e.target.value})} className="w-1/2 px-4 py-2.5 bg-stone-50 border rounded-lg text-sm outline-none" /><input required type="tel" placeholder="WA" value={formData.phone} onChange={e=>setFormData({...formData, phone: e.target.value})} className="w-1/2 px-4 py-2.5 bg-stone-50 border rounded-lg text-sm outline-none" /></div></div>
+               <button type="submit" className={`w-full ${cTheme.bg} text-white py-4 rounded-xl font-bold shadow-lg mt-6`}>Daftar Sekarang</button>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const MemberProfileView = () => {
+  const { db, loggedInMember, memberLogout, cTheme, redeemPrize, addToCart } = useContext(AppStateContext);
+  const [tab, setTab] = useState('wishlist');
+  if (!loggedInMember) return null;
+  const myOrders = db.orders.filter(o => o.memberId === loggedInMember.id);
+  const myWishlist = db.products.filter(p => loggedInMember.wishlist?.includes(p.id));
+
+  return (
+    <div className="max-w-6xl mx-auto animate-fade-in-down flex flex-col lg:flex-row gap-8">
+      <div className="w-full lg:w-80 flex-shrink-0">
+        <div className="bg-white rounded-3xl shadow-sm border border-stone-200 p-8 text-center">
+          {loggedInMember.photoUrl ? <img src={loggedInMember.photoUrl} alt="Pic" className="w-32 h-32 rounded-full object-cover mx-auto mb-4 border-4 border-stone-100 shadow-md" /> : <div className="w-32 h-32 bg-stone-100 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-white shadow-md"><User className="w-12 h-12 text-stone-300"/></div>}
+          <h2 className="text-2xl font-serif font-bold text-stone-900">{loggedInMember.name}</h2>
+          <p className="text-sm font-mono text-stone-500 bg-stone-50 px-3 py-1 rounded-full border border-stone-200 mt-2">{loggedInMember.id}</p>
+          <div className="w-full mt-8 bg-gradient-to-br from-rose-50 to-rose-100 border border-rose-200 rounded-2xl p-6 shadow-inner">
+            <p className="text-xs font-bold text-rose-800 uppercase tracking-widest mb-2">Total Poin Reward</p>
+            <div className="text-4xl font-bold text-rose-600 flex items-center justify-center gap-3"><Award className="w-8 h-8"/> {loggedInMember.points}</div>
+          </div>
+          <button onClick={memberLogout} className="w-full mt-8 py-3.5 bg-stone-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-black shadow-lg"><LogOut className="w-5 h-5"/> Keluar Akun</button>
+        </div>
+      </div>
+
+      <div className="flex-grow bg-white rounded-3xl shadow-sm border border-stone-200 overflow-hidden">
+        <div className="flex border-b border-stone-200 bg-stone-50">
+           <button onClick={() => setTab('wishlist')} className={`flex-1 py-5 font-bold text-sm flex items-center justify-center gap-2 ${tab === 'wishlist' ? `${cTheme.text} border-b-2 ${cTheme.border} bg-white` : 'text-stone-500 hover:bg-stone-100'}`}><Heart className="w-4 h-4"/> Wishlist</button>
+           <button onClick={() => setTab('history')} className={`flex-1 py-5 font-bold text-sm flex items-center justify-center gap-2 ${tab === 'history' ? `${cTheme.text} border-b-2 ${cTheme.border} bg-white` : 'text-stone-500 hover:bg-stone-100'}`}><Clock className="w-4 h-4"/> Riwayat</button>
+           <button onClick={() => setTab('rewards')} className={`flex-1 py-5 font-bold text-sm flex items-center justify-center gap-2 ${tab === 'rewards' ? `${cTheme.text} border-b-2 ${cTheme.border} bg-white` : 'text-stone-500 hover:bg-stone-100'}`}><Gift className="w-4 h-4"/> Hadiah</button>
+        </div>
+        
+        <div className="p-8">
+          {tab === 'wishlist' && (
+            <div className="space-y-6">
+              <h3 className="font-bold text-xl text-stone-800 mb-6">Lemari Impian (Wishlist)</h3>
+              {myWishlist.length === 0 ? <p className="text-stone-500">Belum ada barang di wishlist Anda.</p> : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {myWishlist.map(p => (
+                    <div key={p.id} className="bg-white border border-stone-100 rounded-2xl p-4 shadow-sm">
+                      <img src={p.images?.[0] || 'https://placehold.co/400?text=No+Image'} className="w-full h-40 object-cover rounded-xl mb-4 bg-stone-100" />
+                      <h4 className="font-bold text-stone-800">{p.name}</h4>
+                      <p className={`${cTheme.text} font-bold mt-1 mb-4`}>{formatRupiah(p.price)}</p>
+                      <button onClick={() => addToCart(p)} className={`w-full py-2.5 rounded-xl font-bold text-white ${cTheme.bg}`}>Sewa Sekarang</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'history' && (
+            <div className="space-y-6">
+              <h3 className="font-bold text-xl text-stone-800 mb-6">Riwayat Transaksi</h3>
+              {myOrders.length === 0 ? <p className="text-stone-500">Belum ada transaksi.</p> : 
+                myOrders.map(o => (
+                  <div key={o.id} className="border border-stone-200 p-6 rounded-2xl bg-stone-50">
+                    <div className="flex justify-between items-center mb-4 pb-4 border-b border-stone-200">
+                       <span className="font-mono text-stone-600 font-bold">{o.id}</span>
+                       <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-white border shadow-sm uppercase">{o.status}</span>
+                    </div>
+                    {o.items.map(i => <div key={i.id} className="text-sm font-medium text-stone-800 mb-2">{i.quantity}x {i.name}</div>)}
+                    <div className="flex justify-between items-end mt-6">
+                       <div><p className="text-xs text-stone-500 font-bold uppercase tracking-wider mb-1">Total Biaya</p><p className="font-bold text-stone-900 text-xl">{formatRupiah(o.total)}</p></div>
+                       <p className="text-sm font-bold text-rose-600 bg-rose-100 px-3 py-1.5 rounded-lg">+ {o.earnedPoints} Poin</p>
+                    </div>
+                  </div>
+                ))
+              }
+            </div>
+          )}
+
+          {tab === 'rewards' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {db.prizes.map(p => {
+                const canRedeem = loggedInMember.points >= p.points;
+                return (
+                  <div key={p.id} className="border border-stone-200 rounded-2xl overflow-hidden bg-white shadow-sm flex flex-col">
+                    <div className="h-40 bg-stone-100"><img src={p.image} className="w-full h-full object-cover" /></div>
+                    <div className="p-5 flex flex-col flex-grow">
+                      <h4 className="font-bold text-stone-800 text-lg mb-2">{p.name}</h4>
+                      <p className="text-sm text-stone-500 mb-6 flex-grow">{p.desc}</p>
+                      <div className="flex items-center justify-between border-t border-stone-100 pt-4">
+                         <span className="font-bold text-rose-600 flex items-center gap-1 text-lg"><Award className="w-5 h-5"/> {p.points}</span>
+                         <button onClick={() => redeemPrize(p)} disabled={!canRedeem} className={`px-5 py-2.5 rounded-xl font-bold transition-all shadow-sm ${canRedeem ? `${cTheme.bg} text-white` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}>Tukar</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AdminLogin = () => {
+  const { login, setView } = useContext(AppStateContext);
+  const [uname, setUname] = useState(''); const [pwd, setPwd] = useState('');
+  const [err, setErr] = useState('');
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if(!login(uname, pwd)) setErr('Username atau Password salah!');
+  };
+
+  return (
+    <div className="min-h-screen bg-stone-900 flex items-center justify-center p-4">
+      <div className="bg-white rounded-3xl shadow-2xl p-10 w-full max-w-md animate-fade-in-down">
+        <div className="w-20 h-20 bg-stone-100 rounded-full flex items-center justify-center mx-auto mb-6"><Shield className="w-10 h-10 text-stone-800" /></div>
+        <h2 className="text-2xl font-serif font-bold text-center text-stone-900 mb-2">Admin Panel</h2>
+        <p className="text-center text-stone-500 mb-8 text-sm">Masuk untuk mengelola sistem.</p>
+        
+        {err && <div className="mb-6 p-3 bg-red-50 text-red-600 rounded-xl text-sm font-bold text-center border border-red-200">{err}</div>}
+        
+        <form onSubmit={handleLogin} className="space-y-5">
+          <div><label className="block text-sm font-bold text-stone-700 mb-2">Username</label><input required type="text" value={uname} onChange={e=>setUname(e.target.value)} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none text-[16px]" /></div>
+          <div><label className="block text-sm font-bold text-stone-700 mb-2">Password</label><input required type="password" value={pwd} onChange={e=>setPwd(e.target.value)} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none text-[16px]" /></div>
+          <button type="submit" className="w-full bg-stone-900 text-white py-4 rounded-xl font-bold hover:bg-black transition-colors mt-4 text-lg">Masuk Panel</button>
+        </form>
+        <div className="mt-8 text-center"><button onClick={() => setView('dashboard')} className="text-sm text-stone-400 hover:text-stone-800 font-bold">&larr; Kembali ke Beranda</button></div>
+      </div>
+    </div>
+  );
+};
+
+const AdminLayout = () => {
+  const { loggedInUser, logout, db, setView } = useContext(AppStateContext);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [showSidebar, setShowSidebar] = useState(false);
+
+  const menuItems = [
+    { id: 'dashboard', label: 'Statistik & Laporan', icon: BarChart3 },
+    { id: 'orders', label: 'Pesanan Masuk', icon: Package },
+    { id: 'inventory', label: 'Katalog Barang', icon: Briefcase },
+    { id: 'calendar', label: 'Jadwal Sewa', icon: CalendarIcon },
+    { id: 'customers', label: 'Database Pelanggan', icon: Users },
+    { id: 'prizes', label: 'Katalog Hadiah', icon: Gift },
+    { id: 'approvals', label: 'Antrean Persetujuan', icon: CheckCircle },
+    { id: 'account', label: 'Setelan Akun', icon: User },
+    ...(loggedInUser?.role === 'owner' || loggedInUser?.role === 'developer' ? [
+      { id: 'logs', label: 'Log Audit Sistem', icon: ClipboardList },
+      { id: 'settings', label: 'Pengaturan Merek', icon: SettingsIcon }
+    ] : []),
+    ...(loggedInUser?.role === 'developer' ? [{ id: 'developer', label: 'Developer Console', icon: Terminal }] : [])
+  ];
+
+  return (
+    <div className="flex h-screen bg-stone-50 font-sans">
+      {showSidebar && <div className="fixed inset-0 bg-stone-900/60 z-40 lg:hidden backdrop-blur-sm" onClick={() => setShowSidebar(false)}></div>}
+      
+      <aside className={`fixed lg:static inset-y-0 right-0 z-50 w-[80vw] max-w-sm lg:w-72 bg-stone-900 text-stone-300 flex flex-col shadow-2xl lg:shadow-none transition-transform duration-300 ${showSidebar ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}`}>
+        <div className="p-6 flex items-center justify-between border-b border-stone-800">
+          <div className="overflow-hidden">
+            <h2 className="font-serif font-bold text-xl text-white truncate uppercase">{db.brandConfig.appName}</h2>
+            <p className="text-[10px] text-rose-400 uppercase tracking-widest mt-2 font-bold">{loggedInUser.role} Panel</p>
+          </div>
+          <button className="lg:hidden p-2 text-stone-400 hover:bg-stone-800 rounded-lg transition-colors" onClick={() => setShowSidebar(false)}><X className="w-6 h-6"/></button>
+        </div>
+        <div className="flex-1 overflow-y-auto py-6 px-4 space-y-2 no-scrollbar">
+          {menuItems.map(item => (
+            <button key={item.id} onClick={() => {setActiveTab(item.id); setShowSidebar(false);}} className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-colors ${activeTab === item.id ? 'bg-rose-600 text-white shadow-md' : 'hover:bg-stone-800 hover:text-white'}`}>
+              <item.icon className="w-5 h-5 flex-shrink-0" /> <span className="truncate">{item.label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="p-4 bg-stone-950 space-y-3">
+          <button onClick={() => setView('dashboard')} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold bg-stone-800 text-white hover:bg-stone-700 transition-colors"><Home className="w-5 h-5 flex-shrink-0"/> Ke Website</button>
+          <button onClick={logout} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-red-500 hover:bg-red-500/10 transition-colors"><LogOut className="w-5 h-5 flex-shrink-0"/> Logout</button>
+        </div>
+      </aside>
+      
+      <main className="flex-1 flex flex-col h-screen overflow-hidden">
+        <header className="bg-white border-b border-stone-200 px-6 py-5 flex justify-between items-center z-10 shadow-sm supports-[padding-top:env(safe-area-inset-top)]:pt-[calc(16px+env(safe-area-inset-top))]">
+           <div className="flex items-center gap-3">
+             <button className="lg:hidden p-2 -ml-2 text-stone-600 bg-stone-100 rounded-lg" onClick={() => setShowSidebar(true)}><Menu className="w-6 h-6"/></button>
+             <h1 className="text-xl md:text-2xl font-bold font-serif text-stone-800 capitalize truncate">{activeTab.replace('-', ' ')}</h1>
+           </div>
+           <div className="flex items-center gap-4">
+             <div className="text-right hidden sm:block"><p className="text-sm font-bold text-stone-800">{loggedInUser.name}</p></div>
+             <div className="w-10 h-10 bg-stone-100 rounded-full flex items-center justify-center border border-stone-200"><User className="w-5 h-5 text-stone-600"/></div>
+           </div>
+        </header>
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 w-full overflow-x-hidden">
+          {activeTab === 'dashboard' && <AdminStats />}
+          {activeTab === 'orders' && <AdminOrderManager />}
+          {activeTab === 'inventory' && <AdminInventory />}
+          {activeTab === 'calendar' && <AdminCalendar />}
+          {activeTab === 'customers' && <AdminCustomers />}
+          {activeTab === 'prizes' && <AdminPrizes />}
+          {activeTab === 'approvals' && <AdminApprovals />}
+          {activeTab === 'account' && <AdminAccountSettings />}
+          {activeTab === 'settings' && <AdminSystemSettings />}
+          {activeTab === 'logs' && <AdminLogs />}
+          {activeTab === 'developer' && <AdminDeveloperPanel />}
+        </div>
+      </main>
+    </div>
+  );
+};
+
+const AdminStats = () => {
+  const { db } = useContext(AppStateContext);
+  const completed = db.orders.filter(o => o.status === 'Selesai');
+  const active = db.orders.filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status));
+  const revenue = completed.reduce((s, o) => s + (o.total - (o.totalDeposit||0) + (o.denda||0)), 0);
+
+  return (
+    <div className="space-y-8 animate-fade-in-down">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"><div className="w-12 h-12 bg-green-50 text-green-600 rounded-2xl flex items-center justify-center mb-4"><BarChart3 className="w-6 h-6"/></div><div className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-1">Pendapatan Selesai</div><div className="text-2xl font-bold text-stone-800 truncate">{formatRupiah(revenue)}</div></div>
+        <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"><div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4"><Package className="w-6 h-6"/></div><div className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-1">Pesanan Aktif</div><div className="text-2xl font-bold text-stone-800">{active.length}</div></div>
+        <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"><div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mb-4"><Users className="w-6 h-6"/></div><div className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-1">Total Member</div><div className="text-2xl font-bold text-stone-800">{db.members.filter(m=>m.status === 'approved').length}</div></div>
+      </div>
+    </div>
+  );
+};
+
+const AdminOrderManager = () => {
+  const { db, requireApproval, printInvoice } = useContext(AppStateContext);
+  const [tab, setTab] = useState('aktif');
+  const [expandedId, setExpandedId] = useState(null);
+
+  const displayedOrders = tab === 'aktif' ? db.orders.filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status)) : db.orders.filter(o => ['Selesai', 'Dibatalkan'].includes(o.status));
+  
+  const handleStatusChange = (order, newStatus) => {
+    if (order.status === newStatus) return;
+    let denda = 0;
+    let refund = order.totalDeposit || 0;
+    
+    if (newStatus === 'Selesai') {
+      const input = prompt(`Pesanan ini memiliki Uang Deposit Rp ${formatRupiah(order.totalDeposit)}.\nMasukkan nominal Denda jika telat/rusak (Ketik 0 jika aman):`, "0");
+      if (input === null) return; 
+      denda = parseInt(input) || 0;
+      refund = (order.totalDeposit || 0) - denda;
+      if (refund < 0) refund = 0; 
+    }
+    
+    requireApproval('UPDATE_ORDER', { id: order.id, status: newStatus, denda, refund }, `Status pesanan ${order.id} diubah ke ${newStatus}.`);
+    
+    if (newStatus === 'Selesai' || newStatus === 'Dibatalkan') {
+       order.items.forEach(item => requireApproval('UPDATE_PRODUCT_STATUS', { id: item.id, status: 'Maintenance' }, '', true));
+    }
+  };
+
+  return (
+    <div className="animate-fade-in-down w-full">
+      <div className="flex bg-white border border-stone-200 p-1.5 rounded-2xl w-max shadow-sm mb-6">
+        <button onClick={() => setTab('aktif')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${tab === 'aktif' ? 'bg-stone-900 text-white shadow-md' : 'text-stone-500 hover:bg-stone-50'}`}>Pesanan Berjalan</button>
+        <button onClick={() => setTab('riwayat')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${tab === 'riwayat' ? 'bg-stone-900 text-white shadow-md' : 'text-stone-500 hover:bg-stone-50'}`}>Riwayat Selesai</button>
+      </div>
+
+      <div className="space-y-5">
+        {displayedOrders.length === 0 ? <div className="text-center py-16 bg-white rounded-3xl border border-dashed border-stone-300 text-stone-500"><Package className="w-12 h-12 mx-auto mb-3 text-stone-300"/>Tidak ada pesanan di kategori ini.</div> : displayedOrders.map(order => (
+          <div key={`ord-${order.id}`} className="bg-white border border-stone-200 rounded-3xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+            <div className="p-5 md:p-6 flex justify-between items-center cursor-pointer hover:bg-stone-50 gap-4" onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}>
+              <div className="flex items-center gap-5">
+                <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 border ${order.memberId ? 'bg-rose-50 border-rose-200 text-rose-600' : 'bg-stone-100 border-stone-200 text-stone-500'}`}>
+                  {order.memberId ? <Award className="w-6 h-6"/> : <FileText className="w-6 h-6"/>}
+                </div>
+                <div>
+                  <h4 className="font-bold text-lg text-stone-800 flex items-center gap-2">{order.customer.name} {order.memberId && <span className="bg-rose-600 text-white text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold shadow-sm">Member</span>}</h4>
+                  <p className="text-sm text-stone-500 font-mono mt-1">{order.id} &bull; <span className="font-sans">Tgl Sewa: {order.startDate}</span></p>
+                </div>
+              </div>
+              <div className="flex items-center gap-5"><span className="text-xs font-bold px-4 py-2 rounded-full bg-stone-100 border border-stone-200 uppercase tracking-wide">{order.status}</span><ChevronDown className={`w-5 h-5 text-stone-400 transition-transform ${expandedId === order.id ? 'rotate-180' : ''}`} /></div>
+            </div>
+            
+            {expandedId === order.id && (
+              <div className="p-6 bg-stone-50 border-t border-stone-200">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                  <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm">
+                    <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">Biodata Pelanggan</h5>
+                    <p className="font-bold text-stone-800 mb-1">{order.customer.name}</p>
+                    <p className="text-sm text-stone-600 mb-1">{order.customer.phone}</p>
+                    <p className="text-sm text-stone-600 font-mono mb-3">NIK: {order.customer.identity}</p>
+                  </div>
+                  <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm">
+                    <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">Durasi & Waktu</h5>
+                    <p className="text-sm text-stone-600 mb-2">Mulai: <span className="font-bold text-stone-800">{order.startDate}</span></p>
+                    <p className="text-sm text-stone-600 mb-4">Selesai: <span className="font-bold text-stone-800">{order.endDate}</span></p>
+                    <span className="text-xs font-bold text-rose-800 bg-rose-100 border border-rose-200 px-3 py-1.5 rounded-lg uppercase tracking-wider">Durasi: {order.duration} Hari</span>
+                  </div>
+                  <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm flex flex-col justify-between">
+                    <div>
+                       <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">Tindakan Admin</h5>
+                       <select value={order.status} onChange={(e) => handleStatusChange(order, e.target.value)} className="w-full px-4 py-3 border border-stone-300 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none bg-stone-50 cursor-pointer">
+                         <option value="Menunggu Konfirmasi">Menunggu Konfirmasi</option>
+                         <option value="Siap Diambil">Siap Diambil</option>
+                         <option value="Sedang Disewa">Sedang Disewa</option>
+                         <option value="Selesai">Pesanan Selesai</option>
+                         <option value="Dibatalkan">Batalkan Pesanan</option>
+                       </select>
+                    </div>
+                    <button onClick={() => printInvoice(order)} className="mt-4 w-full bg-stone-900 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-black"><Printer className="w-4 h-4"/> Cetak Struk/Nota</button>
+                  </div>
+                </div>
+                
+                <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-sm">
+                  <div className="p-5 border-b border-stone-100">
+                    <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4">Daftar Pakaian</h5>
+                    <div className="space-y-3">
+                      {order.items.map(item => (
+                        <div key={item.id} className="flex items-center justify-between text-sm">
+                           <div className="flex items-center gap-3"><img src={item.images?.[0] || 'https://placehold.co/400'} className="w-12 h-12 rounded-lg object-cover border" alt="img"/><span className="font-bold text-stone-800">{item.quantity}x {item.name}</span></div>
+                           <div className="text-right">
+                              <span className="font-medium text-stone-500 block">{formatRupiah(item.price * item.quantity * order.duration)} (Sewa)</span>
+                              <span className="font-medium text-amber-600 block">{formatRupiah(item.deposit * item.quantity)} (Deposit)</span>
+                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="bg-stone-900 p-5 text-white flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+                     <div>
+                       <span className="font-bold text-sm uppercase tracking-wider text-stone-400 block mb-1">Total Tagihan Awal</span>
+                       <span className="font-bold text-xl">{formatRupiah(order.total)}</span>
+                     </div>
+                     {order.status === 'Selesai' && (
+                       <div className="bg-stone-800 p-3 rounded-xl border border-stone-700 text-right">
+                          <span className="text-xs text-red-400 font-bold block mb-1">Denda: -{formatRupiah(order.denda)}</span>
+                          <span className="font-bold text-sm text-green-400">Refund Deposit: {formatRupiah(order.totalRefundDeposit)}</span>
+                       </div>
+                     )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const AdminInventory = () => {
+  const { db, requireApproval, getAvailableStock, cTheme, showToast, compressImage, uploadImageToServer } = useContext(AppStateContext);
+  const [invTab, setInvTab] = useState('katalog'); 
+  const [activeCategory, setActiveCategory] = useState('Semua');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [expandedId, setExpandedId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  
+  const [formData, setFormData] = useState({ name: '', price: '', deposit: '', category: db.categories[0] || '', desc: '', images: [], totalStock: 1, productLink: '' });
+  const [editData, setEditData] = useState({ price: '', totalStock: '', deposit: '', productLink: '', images: [] });
+
+  const handleImageUpload = async (e, isEdit = false) => { 
+    const files = Array.from(e.target.files); 
+    if (!files.length) return; 
+    
+    showToast('Mengkompresi gambar...', 'info');
+    const compressedUrls = [];
+    for(let f of files) {
+      const compressed = await compressImage(f);
+      const url = await uploadImageToServer(compressed);
+      compressedUrls.push(url);
+    }
+    
+    if (isEdit) {
+      setEditData(prev => ({ ...prev, images: [...(prev.images || []), ...compressedUrls] }));
+    } else {
+      setFormData(prev => ({ ...prev, images: [...(prev.images || []), ...compressedUrls] }));
+    }
+    showToast('Gambar OK', 'success');
+  };
+
+  const removeImage = (idx, isEdit = false) => {
+    if (isEdit) {
+      setEditData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
+    } else {
+      setFormData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
+    }
+  };
+
+  const generateId = (cat) => { const prefix = cat ? cat.substring(0,2).toUpperCase() : 'XX'; const count = db.products.filter(p => p.id.startsWith(prefix)).length + 1; return `${prefix}-${1000 + count}`; };
+  
+  const handleAddProduct = (e) => { e.preventDefault(); requireApproval('ADD_PRODUCT', { id: generateId(formData.category), ...formData, price: parseInt(formData.price), deposit: parseInt(formData.deposit||0), totalStock: parseInt(formData.totalStock), status: 'Tersedia' }, 'Produk disimpan.'); setShowAddForm(false); setFormData({ name: '', price: '', deposit:'', category: db.categories[0] || '', desc: '', images: [], totalStock: 1, productLink: '' }); };
+  const handleAddCategory = (e) => { e.preventDefault(); if (newCategoryName.trim() && !db.categories.includes(newCategoryName.trim())) { requireApproval('ADD_CATEGORY', newCategoryName.trim(), 'Kategori dibuat.'); setNewCategoryName(''); } };
+  const handleSaveEdit = (p) => { if(editData.price && editData.totalStock) { requireApproval('EDIT_PRODUCT', {...p, price: parseInt(editData.price), deposit: parseInt(editData.deposit||0), totalStock: parseInt(editData.totalStock), productLink: editData.productLink, images: editData.images}, 'Perubahan disimpan.'); setEditingId(null); } };
+
+  const filteredProducts = db.products.filter(p => p.status !== 'Maintenance' && (activeCategory === 'Semua' || p.category === activeCategory) && (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase())));
+  const maintenanceProducts = db.products.filter(p => p.status === 'Maintenance');
+
+  return (
+    <div className="animate-fade-in-down w-full">
+      <div className="w-full overflow-x-auto mb-6 pb-2">
+        <div className="flex bg-white border border-stone-200 p-1.5 rounded-2xl w-max shadow-sm">
+          <button onClick={() => setInvTab('katalog')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${invTab === 'katalog' ? 'bg-stone-900 text-white shadow-md' : 'text-stone-500 hover:bg-stone-50'}`}>Katalog Aktif</button>
+          <button onClick={() => setInvTab('maintenance')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${invTab === 'maintenance' ? 'bg-stone-900 text-white shadow-md' : 'text-stone-500 hover:bg-stone-50'}`}>Masuk Maintenance {maintenanceProducts.length > 0 && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">{maintenanceProducts.length}</span>}</button>
+        </div>
+      </div>
+
+      {invTab === 'katalog' && (
+        <>
+          <div className="bg-white p-6 md:p-8 rounded-3xl border border-stone-200 shadow-sm mb-6">
+             <h3 className="font-bold text-stone-800 mb-5 flex items-center gap-2"><SettingsIcon className="w-5 h-5 text-stone-400"/> Pengaturan Kategori</h3>
+             <div className="flex flex-wrap items-center gap-3 mb-6">
+                <button onClick={() => setActiveCategory('Semua')} className={`px-5 py-2.5 rounded-full text-sm font-bold transition-all ${activeCategory === 'Semua' ? 'bg-stone-900 text-white shadow-md' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}>Semua Filter</button>
+                {db.categories.map(cat => (
+                   <div key={`cat-${cat}`} className={`flex items-center rounded-full border transition-all ${activeCategory === cat ? `${cTheme.bg} text-white border-transparent shadow-md` : 'bg-white border-stone-200 text-stone-700 shadow-sm'}`}>
+                     <button onClick={() => setActiveCategory(cat)} className="px-5 py-2.5 text-sm font-medium">{cat}</button>
+                     <div className="w-px h-5 bg-stone-300"></div>
+                     <button onClick={() => requireApproval('DELETE_CATEGORY', cat, 'Kategori dihapus.', true)} className={`p-2.5 rounded-r-full transition-colors ${activeCategory === cat ? 'hover:bg-black/20 text-white' : 'text-stone-400 hover:text-red-500 hover:bg-red-50'}`}><X className="w-4 h-4"/></button>
+                   </div>
+                ))}
+             </div>
+             <form onSubmit={handleAddCategory} className="flex gap-3 w-full max-w-sm">
+                <input type="text" placeholder="Tambah kategori baru..." value={newCategoryName} onChange={e=>setNewCategoryName(e.target.value)} required className="flex-1 px-5 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:outline-none focus:border-stone-400" />
+                <button type="submit" className="bg-stone-900 text-white px-5 py-3 rounded-xl font-bold hover:bg-black transition-colors"><Plus className="w-5 h-5"/></button>
+             </form>
+          </div>
+
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
+             <div className="relative flex-1 max-w-xl">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
+                <input type="text" placeholder="Cari ID atau nama baju..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="w-full pl-12 pr-4 py-3.5 bg-white border border-stone-200 rounded-xl text-[16px] focus:outline-none focus:border-stone-400 shadow-sm" />
+             </div>
+             <button onClick={() => setShowAddForm(!showAddForm)} disabled={db.categories.length === 0} className={`text-white px-6 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:brightness-110 shadow-lg active:scale-95 ${db.categories.length === 0 ? 'bg-stone-300 cursor-not-allowed' : cTheme.bg}`}><Plus className="w-5 h-5"/> {showAddForm ? 'Tutup Formulir' : 'Tambah Produk'}</button>
+          </div>
+
+          {showAddForm && (
+            <div className="bg-white p-6 md:p-8 rounded-3xl border border-stone-200 shadow-sm mb-8 animate-fade-in-down">
+               <h3 className="font-bold text-xl text-stone-800 mb-6 border-b pb-3">Formulir Produk Baru</h3>
+               <form onSubmit={handleAddProduct} className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <div><label className="block text-sm font-bold text-stone-700 mb-2">Nama Baju / Produk</label><input required type="text" value={formData.name} onChange={e=>setFormData({...formData, name: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400" /></div>
+                  <div className="grid grid-cols-2 gap-4">
+                     <div><label className="block text-sm font-bold text-stone-700 mb-2">Harga Sewa / Hari</label><input required type="number" value={formData.price} onChange={e=>setFormData({...formData, price: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400" /></div>
+                     <div><label className="block text-sm font-bold text-amber-700 mb-2">Deposit (Jaminan)</label><input type="number" value={formData.deposit} onChange={e=>setFormData({...formData, deposit: e.target.value})} className="w-full px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-[16px] outline-none focus:border-amber-400" /></div>
+                  </div>
+                  <div><label className="block text-sm font-bold text-stone-700 mb-2">Pilih Kategori</label><select required value={formData.category} onChange={e=>setFormData({...formData, category: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400 cursor-pointer">{db.categories.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+                  <div><label className="block text-sm font-bold text-stone-700 mb-2">Jumlah Fisik Barang</label><input required type="number" min="1" value={formData.totalStock} onChange={e=>setFormData({...formData, totalStock: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400" /></div>
+                  
+                  <div className="sm:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Link Referensi/Eksternal (Opsional)</label><input type="url" placeholder="https://" value={formData.productLink} onChange={e=>setFormData({...formData, productLink: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400" /></div>
+                  
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-bold text-stone-700 mb-2">Upload Foto Barang (Bisa Banyak)</label>
+                    <div className="flex gap-3 overflow-x-auto pb-2">
+                       {formData.images.map((img, idx) => (
+                         <div key={idx} className="relative shrink-0">
+                           <img src={img} className="w-20 h-20 object-cover rounded-xl border border-stone-200 shadow-sm" />
+                           <button type="button" onClick={() => removeImage(idx, false)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600"><X className="w-3 h-3"/></button>
+                         </div>
+                       ))}
+                       <label className="w-20 h-20 shrink-0 flex items-center justify-center border-2 border-dashed border-stone-300 rounded-xl cursor-pointer hover:bg-stone-50 text-stone-400 bg-white">
+                         <Plus className="w-6 h-6" />
+                         <input type="file" multiple accept="image/*" onChange={(e) => handleImageUpload(e, false)} className="hidden" />
+                       </label>
+                    </div>
+                  </div>
+
+                  <div className="sm:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Deskripsi Detail</label><textarea required rows="3" value={formData.desc} onChange={e=>setFormData({...formData, desc: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400"></textarea></div>
+                  <div className="sm:col-span-2 mt-4"><button type="submit" className={`w-full py-4 ${cTheme.bg} text-white font-bold text-lg rounded-xl shadow-lg active:scale-95`}>Simpan ke Katalog</button></div>
+               </form>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {filteredProducts.map(p => {
+              const avail = getAvailableStock(p.id);
+              const isExpanded = expandedId === p.id;
+              const isEditing = editingId === p.id;
+              return (
+                <div key={p.id} className="bg-white border border-stone-100 rounded-3xl shadow-sm overflow-hidden flex flex-col hover:shadow-lg transition-shadow">
+                   <div className="p-5 flex gap-5 cursor-pointer hover:bg-stone-50 transition-colors" onClick={() => {setExpandedId(isExpanded ? null : p.id); setEditingId(null);}}>
+                      <img src={p.images?.[0] || 'https://placehold.co/400?text=No+Image'} alt={p.name} className="w-20 h-20 rounded-2xl object-cover border border-stone-100 shadow-sm" />
+                      <div className="flex-1 overflow-hidden">
+                         <h4 className="font-bold text-stone-800 text-base leading-tight mb-1 truncate">{p.name}</h4>
+                         <p className="text-xs font-mono text-stone-400 bg-stone-100 px-2 py-0.5 rounded w-max mb-2">{p.id} &bull; {p.category}</p>
+                         <div className="flex justify-between items-center">
+                            <p className="text-sm font-bold text-stone-900">{formatRupiah(p.price)}</p>
+                            <span className={`text-[10px] uppercase tracking-wider font-bold px-3 py-1 rounded-md border ${avail>0?'bg-green-50 text-green-700 border-green-200':'bg-red-50 text-red-700 border-red-200'}`}>Sisa: {avail}/{p.totalStock}</span>
+                         </div>
+                      </div>
+                   </div>
+                   {isExpanded && (
+                     <div className="p-5 bg-stone-50 border-t border-stone-200 flex-1 flex flex-col">
+                        <p className="text-sm text-stone-600 mb-5 flex-grow leading-relaxed">{p.desc}</p>
+                        
+                        <div className="bg-white p-3 rounded-lg border border-stone-100 mb-5 text-sm font-bold text-amber-700">Uang Jaminan: {formatRupiah(p.deposit)}</div>
+                        
+                        {isEditing ? (
+                          <div className="space-y-4 mb-5 bg-white p-4 rounded-2xl border border-stone-200 shadow-sm">
+                             <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Harga</label><input type="number" value={editData.price} onChange={e=>setEditData({...editData, price: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
+                             <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Deposit</label><input type="number" value={editData.deposit} onChange={e=>setEditData({...editData, deposit: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
+                             <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Stok Fisik</label><input type="number" value={editData.totalStock} onChange={e=>setEditData({...editData, totalStock: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
+                             <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Link Eksternal</label><input type="url" value={editData.productLink} onChange={e=>setEditData({...editData, productLink: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
+                             
+                             <div>
+                               <label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Album Foto Produk</label>
+                               <div className="flex gap-2 overflow-x-auto pb-2 mt-2">
+                                  {editData.images?.map((img, idx) => (
+                                    <div key={idx} className="relative shrink-0">
+                                      <img src={img} className="w-12 h-12 object-cover rounded-lg border border-stone-200 shadow-sm" />
+                                      <button type="button" onClick={() => removeImage(idx, true)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 shadow-md hover:bg-red-600"><X className="w-3 h-3"/></button>
+                                    </div>
+                                  ))}
+                                  <label className="w-12 h-12 shrink-0 flex items-center justify-center border-2 border-dashed border-stone-300 rounded-lg cursor-pointer hover:bg-stone-50 text-stone-400 bg-white">
+                                    <Plus className="w-4 h-4" />
+                                    <input type="file" multiple accept="image/*" onChange={(e) => handleImageUpload(e, true)} className="hidden" />
+                                  </label>
+                               </div>
+                             </div>
+
+                             <div className="flex gap-3 pt-3">
+                               <button onClick={() => setEditingId(null)} className="flex-1 py-2.5 bg-stone-100 text-stone-700 rounded-xl text-sm font-bold hover:bg-stone-200">Batal</button>
+                               <button onClick={() => handleSaveEdit(p)} className={`flex-1 py-2.5 ${cTheme.bg} text-white rounded-xl text-sm font-bold shadow-md`}>Simpan</button>
+                             </div>
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap sm:flex-nowrap gap-3 mt-auto">
+                            <button onClick={() => requireApproval('UPDATE_PRODUCT_STATUS', {id: p.id, status: 'Maintenance'}, 'Pakaian masuk ruang perawatan.')} className="w-full sm:flex-1 py-3 bg-yellow-50 text-yellow-700 rounded-xl text-xs uppercase tracking-wider font-bold flex items-center justify-center gap-2 hover:bg-yellow-100 border border-yellow-200"><Edit3 className="w-4 h-4"/> Perawatan</button>
+                            <button onClick={() => requireApproval('DELETE_PRODUCT', {id: p.id}, 'Katalog dihapus.', true)} className="flex-1 py-3 bg-white text-red-600 rounded-xl text-xs uppercase tracking-wider font-bold flex items-center justify-center gap-2 hover:bg-red-50 border border-stone-200 shadow-sm"><Trash2 className="w-4 h-4"/> Hapus</button>
+                            <button onClick={(e) => { e.stopPropagation(); setEditingId(p.id); setEditData({price: p.price, totalStock: p.totalStock, deposit: p.deposit, productLink: p.productLink||'', images: p.images || [p.image]}); }} className="flex-1 py-3 bg-stone-900 text-white rounded-xl text-xs uppercase tracking-wider font-bold flex items-center justify-center gap-2 hover:bg-black shadow-md"><Edit3 className="w-4 h-4"/> Edit</button>
+                          </div>
+                        )}
+                     </div>
+                   )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {invTab === 'maintenance' && (
+        <div className="bg-white p-6 md:p-10 rounded-3xl border border-stone-200 shadow-sm">
+           <h3 className="font-bold text-xl text-stone-800 mb-2 flex items-center gap-3"><SettingsIcon className="w-6 h-6 text-yellow-500"/> Gudang Perawatan</h3>
+           <p className="text-stone-500 mb-8">Pakaian yang dikembalikan dari pelanggan ada di sini. Disembunyikan dari katalog publik secara otomatis.</p>
+           {maintenanceProducts.length === 0 ? <div className="text-center py-16 bg-stone-50 border border-dashed border-stone-300 rounded-3xl text-stone-500"><CheckCircle className="w-12 h-12 mx-auto mb-4 text-stone-300"/>Semua barang dalam kondisi baik.</div> : (
+             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+               {maintenanceProducts.map(p => (
+                 <div key={p.id} className="border border-stone-200 rounded-3xl p-5 flex flex-col hover:shadow-md transition-shadow bg-stone-50">
+                    <img src={p.images?.[0] || 'https://placehold.co/400?text=No+Image'} className="w-full h-40 object-cover rounded-2xl mb-4 shadow-sm" alt="Item"/>
+                    <h4 className="font-bold text-stone-800 text-lg mb-1">{p.name}</h4>
+                    <p className="text-xs font-mono text-stone-500 mb-5">{p.id}</p>
+                    <button onClick={() => requireApproval('UPDATE_PRODUCT_STATUS', {id: p.id, status: 'Tersedia'}, 'Pakaian siap disewakan kembali.')} className="mt-auto w-full py-3 bg-green-500 text-white rounded-xl text-sm font-bold hover:bg-green-600 flex items-center justify-center gap-2 shadow-md active:scale-95"><CheckCircle className="w-5 h-5"/> Selesai Diperbaiki</button>
+                 </div>
+               ))}
+             </div>
+           )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const AdminCalendar = () => {
+  const { db } = useContext(AppStateContext);
+  const [search, setSearch] = useState('');
+  const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
+  const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+  const [selectedDate, setSelectedDate] = useState(null);
+
+  const filteredOrders = db.orders.filter(order => {
+    if (!search) return true;
+    const s = search.toLowerCase();
+    return order.items.some(item => item.name.toLowerCase().includes(s) || item.id.toLowerCase().includes(s));
+  });
+
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const firstDay = new Date(currentYear, currentMonth, 1).getDay();
+  const nextMonth = () => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(currentYear + 1); } else setCurrentMonth(currentMonth + 1); };
+  const prevMonth = () => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(currentYear - 1); } else setCurrentMonth(currentMonth - 1); };
+  const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+
+  const getOrdersForDate = (day) => {
+    const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const targetDate = new Date(dateStr);
+    return filteredOrders.filter(o => {
+       const start = new Date(o.startDate);
+       const end = new Date(o.endDate || o.startDate);
+       if(!o.endDate) end.setDate(end.getDate() + (o.duration - 1));
+       return targetDate >= start && targetDate <= end && ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status);
+    });
+  };
+
+  return (
+    <div className="space-y-8 animate-fade-in-down w-full">
+      <div className="bg-white p-6 md:p-8 rounded-3xl border border-stone-200 shadow-sm flex flex-col sm:flex-row justify-between sm:items-center gap-6">
+         <div>
+            <h2 className="font-bold font-serif text-2xl text-stone-900 flex items-center gap-3"><CalendarIcon className="w-7 h-7 text-rose-600"/> Kalender Penyewaan</h2>
+            <p className="text-stone-500 mt-2">Mencegah bentrok penyewaan (Double-Booking) secara visual.</p>
+         </div>
+         <div className="relative w-full sm:w-72">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
+            <input type="text" placeholder="Lacak ID Pakaian..." value={search} onChange={e=>setSearch(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] focus:outline-none focus:border-rose-600 transition-colors shadow-inner" />
+         </div>
+      </div>
+
+      <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden p-6 md:p-10">
+         <div className="flex justify-between items-center mb-8">
+            <button onClick={prevMonth} className="p-3 bg-stone-50 hover:bg-stone-100 rounded-xl transition-colors border border-stone-200"><ChevronLeft className="w-6 h-6 text-stone-700"/></button>
+            <h3 className="font-bold text-2xl font-serif text-stone-900 uppercase tracking-widest">{monthNames[currentMonth]} {currentYear}</h3>
+            <button onClick={nextMonth} className="p-3 bg-stone-50 hover:bg-stone-100 rounded-xl transition-colors border border-stone-200"><ChevronRight className="w-6 h-6 text-stone-700"/></button>
+         </div>
+
+         <div className="grid grid-cols-7 gap-2 md:gap-4 text-center mb-4">
+            {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map((d, i) => <div key={`dow-${i}`} className="text-xs font-bold text-stone-400 uppercase tracking-widest">{d}</div>)}
+         </div>
+         <div className="grid grid-cols-7 gap-2 md:gap-4">
+            {Array.from({ length: firstDay }).map((_, i) => <div key={`pad-${i}`} className="p-2 md:p-4 rounded-2xl bg-stone-50 border border-dashed border-stone-200"></div>)}
+            {Array.from({ length: daysInMonth }).map((_, i) => {
+               const day = i + 1;
+               const dayOrders = getOrdersForDate(day);
+               const hasOrders = dayOrders.length > 0;
+               return (
+                 <div key={`day-${day}`} onClick={() => hasOrders && setSelectedDate({ day, month: currentMonth, year: currentYear, orders: dayOrders })} className={`p-3 md:p-5 rounded-2xl border flex flex-col items-center justify-center min-h-[70px] md:min-h-[100px] transition-all ${hasOrders ? 'bg-rose-50 border-rose-200 cursor-pointer hover:bg-rose-100 shadow-sm hover:scale-105' : 'bg-white border-stone-100 text-stone-400'}`}>
+                    <span className={`text-base md:text-xl font-bold ${hasOrders ? 'text-rose-900' : ''}`}>{day}</span>
+                    {hasOrders && <span className="mt-2 text-[10px] md:text-xs font-bold bg-rose-600 text-white px-3 py-1 rounded-full uppercase tracking-wider">{dayOrders.length} Event</span>}
+                 </div>
+               );
+            })}
+         </div>
+      </div>
+
+      {selectedDate && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-md" onClick={() => setSelectedDate(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-fade-in-down" onClick={e=>e.stopPropagation()}>
+            <div className="p-6 md:p-8 border-b border-stone-100 flex justify-between items-center bg-stone-50">
+               <h3 className="font-bold font-serif text-xl text-stone-900">Jadwal: {selectedDate.day} {monthNames[selectedDate.month]}</h3>
+               <button onClick={() => setSelectedDate(null)} className="p-2 bg-white hover:bg-stone-100 rounded-full text-stone-500 border border-stone-200 shadow-sm"><X className="w-5 h-5"/></button>
+            </div>
+            <div className="p-6 md:p-8 max-h-[60vh] overflow-y-auto space-y-5">
+               {selectedDate.orders.map(o => (
+                 <div key={`modal-ord-${o.id}`} className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm">
+                    <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-4 pb-4 border-b border-stone-100 gap-3">
+                       <div><p className="font-bold text-base text-stone-800">{o.customer.name}</p><p className="text-xs text-stone-500 font-mono mt-1">{o.id}</p></div>
+                       <span className="text-[10px] font-bold px-3 py-1.5 bg-stone-100 border border-stone-200 rounded-lg text-stone-600 w-max uppercase tracking-wider">{o.status}</span>
+                    </div>
+                    <ul className="space-y-3">
+                       {o.items.map(item => (
+                         <li key={`modal-item-${item.id}`} className="flex items-center gap-4 text-sm">
+                            <img src={item.images?.[0]} alt={item.name} className="w-12 h-12 rounded-xl border border-stone-100 object-cover shadow-sm"/>
+                            <div><p className="font-bold text-stone-800 leading-tight">{item.quantity}x {item.name}</p><p className="text-[10px] text-stone-400 font-mono mt-1">{item.id}</p></div>
+                         </li>
+                       ))}
+                    </ul>
+                 </div>
+               ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const AdminCustomers = () => {
+  const { db, handleApproval, loggedInUser, cTheme } = useContext(AppStateContext);
+  const [tab, setTab] = useState('member');
+  const approvedMembers = db.members.filter(m => m.status === 'approved');
+  const nonMembers = db.orders.filter(o => !o.memberId).reduce((acc, order) => {
+     const existing = acc.find(c => c.identity === order.customer.identity);
+     if (existing) { existing.totalSpent += order.total; existing.orderCount += 1; } else { acc.push({ ...order.customer, totalSpent: order.total, orderCount: 1 }); }
+     return acc;
+  }, []);
+  const memberApps = db.approvals.filter(a => a.actionType === 'REGISTER_MEMBER');
+
+  return (
+    <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden animate-fade-in-down w-full">
+      <div className="flex border-b border-stone-200 bg-stone-50 w-full overflow-x-auto no-scrollbar">
+         <button onClick={() => setTab('member')} className={`px-6 md:px-8 py-5 font-bold text-sm uppercase tracking-wider ${tab === 'member' ? `${cTheme.text} border-b-2 ${cTheme.border} bg-white shadow-sm` : 'text-stone-500 hover:text-stone-800'}`}>Member Aktif ({approvedMembers.length})</button>
+         <button onClick={() => setTab('nonmember')} className={`px-6 md:px-8 py-5 font-bold text-sm uppercase tracking-wider ${tab === 'nonmember' ? `${cTheme.text} border-b-2 ${cTheme.border} bg-white shadow-sm` : 'text-stone-500 hover:text-stone-800'}`}>Non Member ({nonMembers.length})</button>
+         <button onClick={() => setTab('approval')} className={`px-6 md:px-8 py-5 font-bold text-sm uppercase tracking-wider flex items-center gap-2 ${tab === 'approval' ? `${cTheme.text} border-b-2 ${cTheme.border} bg-white shadow-sm` : 'text-stone-500 hover:text-stone-800'}`}>Persetujuan {memberApps.length > 0 && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">{memberApps.length}</span>}</button>
+      </div>
+
+      <div className="w-full overflow-x-auto">
+        {tab === 'member' && (
+          <table className="w-full text-left border-collapse min-w-[700px]">
+            <thead><tr className="bg-stone-50 text-stone-500 font-bold border-b border-stone-200 text-xs uppercase tracking-wider"><th className="p-5">Profil</th><th className="p-5">Kontak</th><th className="p-5 text-right">Poin</th></tr></thead>
+            <tbody className="divide-y divide-stone-100">
+              {approvedMembers.map(m => (
+                <tr key={m.id} className="hover:bg-stone-50/50">
+                  <td className="p-5 flex items-center gap-4">
+                    {m.photoUrl ? <img src={m.photoUrl} alt="Pic" className="w-12 h-12 rounded-full object-cover border"/> : <div className="w-12 h-12 rounded-full bg-stone-100 border flex items-center justify-center"><User className="w-6 h-6 text-stone-400"/></div>}
+                    <div><p className="font-bold text-stone-800 text-base">{m.name}</p><p className="text-xs font-mono text-stone-500 mt-1">{m.id}</p></div>
+                  </td>
+                  <td className="p-5"><p className="font-bold text-stone-700">{m.phone}</p><p className="text-xs text-stone-500 mt-1">{m.email}</p></td>
+                  <td className="p-5 text-right"><span className="font-bold text-rose-700 bg-rose-50 px-4 py-2 rounded-xl border border-rose-200 inline-flex items-center gap-2 shadow-sm"><Award className="w-5 h-5"/> {m.points}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {tab === 'nonmember' && (
+          <table className="w-full text-left border-collapse min-w-[700px]">
+            <thead><tr className="bg-stone-50 text-stone-500 font-bold border-b border-stone-200 text-xs uppercase tracking-wider"><th className="p-5">Pelanggan</th><th className="p-5">KTP</th><th className="p-5">Kontak</th><th className="p-5 text-right">Riwayat</th></tr></thead>
+            <tbody className="divide-y divide-stone-100">
+              {nonMembers.map((nm, idx) => (
+                <tr key={idx} className="hover:bg-stone-50/50">
+                  <td className="p-5 font-bold text-stone-800">{nm.name}</td>
+                  <td className="p-5 font-mono text-stone-600">{nm.identity}</td>
+                  <td className="p-5 font-medium text-stone-700">{nm.phone}</td>
+                  <td className="p-5 text-right"><p className="font-bold text-stone-800">{nm.orderCount}x</p><p className="text-xs text-stone-500">{formatRupiah(nm.totalSpent)}</p></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {tab === 'approval' && (
+          <div className="p-6 md:p-8 space-y-5">
+            {memberApps.map(app => (
+              <div key={app.id} className="bg-stone-50 p-6 rounded-2xl border border-stone-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-sm">
+                 <div className="flex items-center gap-5">
+                    {app.payload.photoUrl ? <img src={app.payload.photoUrl} className="w-16 h-16 rounded-full object-cover border-4 border-white shadow-md" alt="foto"/> : <div className="w-16 h-16 rounded-full bg-white shadow-md border flex items-center justify-center"><User className="w-8 h-8 text-stone-300"/></div>}
+                    <div>
+                      <p className="font-bold text-stone-800 text-lg mb-1">{app.requestedBy}</p>
+                      <p className="text-xs text-stone-500 font-mono">{app.payload.identity} &bull; {app.payload.phone}</p>
+                    </div>
+                 </div>
+                 <div className="flex gap-3 w-full md:w-auto">
+                   <button onClick={() => handleApproval(app.id, 'reject')} className="flex-1 px-6 py-3 bg-white text-red-600 border border-stone-200 rounded-xl text-sm font-bold shadow-sm">Tolak</button>
+                   <button onClick={() => handleApproval(app.id, 'approve')} className={`flex-1 px-6 py-3 ${cTheme.bg} text-white rounded-xl text-sm font-bold shadow-lg`}>Terima Member</button>
+                 </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const AdminPrizes = () => {
+  const { db, requireApproval, cTheme, showToast, compressImage, uploadImageToServer } = useContext(AppStateContext);
+  const [formData, setFormData] = useState({ name: '', points: '', desc: '', image: null });
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleImageUpload = async (e) => { 
+    const file = e.target.files[0]; 
+    if (!file) return; 
+    setIsUploading(true);
+    showToast('Mengkompresi gambar hadiah...', 'info');
+    const compressed = await compressImage(file);
+    const url = await uploadImageToServer(compressed);
+    setFormData(p => ({ ...p, image: url })); 
+    setIsUploading(false);
+    showToast('Gambar OK', 'success');
+  };
+  const handleAdd = (e) => { e.preventDefault(); requireApproval('ADD_PRIZE', { id: `PRZ-${Date.now()}`, name: formData.name, points: parseInt(formData.points), desc: formData.desc, image: formData.image || '' }, 'Hadiah tersimpan.'); setFormData({ name: '', points: '', desc: '', image: null }); };
+
+  return (
+    <div className="animate-fade-in-down w-full space-y-8">
+      <div className="bg-white p-6 md:p-8 rounded-3xl border border-stone-200 shadow-sm">
+         <h2 className="text-xl font-serif font-bold mb-6 flex items-center gap-3 border-b border-stone-100 pb-4"><Gift className="w-6 h-6 text-rose-600"/> Tambah Katalog Hadiah</h2>
+         <form onSubmit={handleAdd} className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <div><label className="block text-sm font-bold text-stone-700 mb-2">Nama Hadiah</label><input required type="text" value={formData.name} onChange={e=>setFormData({...formData, name: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
+            <div><label className="block text-sm font-bold text-stone-700 mb-2">Harga (Poin)</label><input required type="number" min="1" value={formData.points} onChange={e=>setFormData({...formData, points: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
+            <div className="sm:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Deskripsi Singkat</label><textarea required rows="2" value={formData.desc} onChange={e=>setFormData({...formData, desc: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none"></textarea></div>
+            <div className="sm:col-span-2"><label className="flex items-center justify-center p-5 border-2 border-dashed border-stone-300 rounded-2xl cursor-pointer hover:bg-stone-50 text-sm font-bold text-stone-500 bg-white"><Upload className="w-5 h-5 mr-3" /> {isUploading ? 'Uploading...' : formData.image ? 'Gambar Siap' : 'Upload Foto Hadiah'}<input required={!formData.image} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" /></label></div>
+            <button type="submit" className={`sm:col-span-2 py-4 ${cTheme.bg} text-white font-bold text-lg rounded-xl mt-4 shadow-lg active:scale-95`}>Masukkan ke Katalog</button>
+         </form>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        {db.prizes.map(p => (
+           <div key={p.id} className="bg-white border border-stone-200 rounded-3xl shadow-sm overflow-hidden flex flex-col hover:shadow-lg">
+              <div className="h-40 bg-stone-100 relative">
+                 <img src={p.image} className="w-full h-full object-cover" alt="prize"/>
+                 <button onClick={() => requireApproval('DELETE_PRIZE', {id: p.id}, 'Dihapus.', true)} className="absolute top-3 right-3 p-2 bg-red-600 text-white rounded-full hover:bg-red-700"><Trash2 className="w-4 h-4"/></button>
+              </div>
+              <div className="p-5 flex flex-col flex-grow">
+                 <h4 className="font-bold text-lg text-stone-900 mb-2">{p.name}</h4>
+                 <p className="text-sm text-stone-500 mb-5 flex-grow line-clamp-2">{p.desc}</p>
+                 <span className="font-bold text-rose-700 flex items-center justify-center gap-2 bg-rose-50 w-full py-2.5 rounded-xl border border-rose-200"><Award className="w-5 h-5"/> {p.points} Poin</span>
+              </div>
+           </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const AdminApprovals = () => {
+  const { db, handleApproval, loggedInUser } = useContext(AppStateContext);
+  const sysApps = db.approvals.filter(a => a.actionType !== 'REGISTER_MEMBER');
+  if (sysApps.length === 0) return <div className="text-center py-20 text-stone-500 bg-white rounded-3xl border border-dashed border-stone-300 animate-fade-in-down"><CheckCircle className="w-16 h-16 mx-auto mb-4 text-stone-300"/>Aman, tidak ada antrean.</div>;
+
+  return (
+    <div className="space-y-5 w-full animate-fade-in-down">
+      <h2 className="text-xl font-serif font-bold text-stone-800 mb-6 flex items-center gap-3"><Shield className="w-6 h-6 text-rose-600"/> Otorisasi Sistem ({sysApps.length})</h2>
+      {sysApps.map(app => {
+        const canApprove = ['owner','developer'].includes(loggedInUser.role) || (loggedInUser.role === 'manager' && !(app.requesterRole === 'manager' && app.actionType === 'UPDATE_USER'));
+        return (
+          <div key={app.id} className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+            <div className="overflow-hidden w-full md:w-auto">
+              <div className="flex flex-wrap items-center gap-3 mb-3"><span className="bg-yellow-50 text-yellow-700 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded border border-yellow-200">Butuh Akses</span><span className="text-[10px] text-stone-400 font-mono">{app.id}</span></div>
+              <p className="font-bold text-stone-900 text-lg truncate mb-1">{app.actionType.replace('_', ' ')}</p>
+              <p className="text-sm text-stone-600 truncate">Diajukan: <span className="font-bold">{app.requestedBy}</span> <span className="bg-stone-100 border border-stone-200 px-2 py-0.5 rounded text-[10px] uppercase font-bold ml-2">{app.requesterRole}</span></p>
+            </div>
+            {canApprove ? (
+              <div className="flex gap-3 w-full md:w-auto">
+                <button onClick={() => handleApproval(app.id, 'reject')} className="flex-1 px-6 py-3 bg-white text-red-600 border border-stone-200 rounded-xl text-sm font-bold hover:bg-stone-50">Tolak Paksa</button>
+                <button onClick={() => handleApproval(app.id, 'approve')} className="flex-1 px-6 py-3 bg-stone-900 text-white rounded-xl text-sm font-bold hover:bg-black">Berikan Izin</button>
+              </div>
+            ) : (<div className="w-full md:w-auto text-center px-6 py-3 bg-stone-50 border border-stone-200 rounded-xl text-xs font-bold text-stone-500 uppercase">Kunci Owner</div>)}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+const AdminAccountSettings = () => {
+  const { loggedInUser, requireApproval } = useContext(AppStateContext);
+  const [formData, setFormData] = useState({ name: loggedInUser.name, username: loggedInUser.username, password: loggedInUser.password });
+  const handleSubmit = (e) => { e.preventDefault(); requireApproval('UPDATE_USER', { userId: loggedInUser.id, ...formData }, 'Pembaruan profil sedang diproses.', true); };
+
+  return (
+    <div className="max-w-2xl bg-white p-8 md:p-12 rounded-3xl border border-stone-200 shadow-sm w-full mx-auto animate-fade-in-down">
+      <div className="w-24 h-24 bg-stone-100 rounded-full flex items-center justify-center mb-8 border-4 border-white shadow-md mx-auto"><User className="w-10 h-10 text-stone-400"/></div>
+      <h2 className="text-2xl font-serif font-bold mb-8 text-center text-stone-800">Ubah Kredensial Pribadi</h2>
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <div><label className="block text-sm font-bold text-stone-700 mb-2">Nama Tampilan</label><input required type="text" value={formData.name} onChange={e=>setFormData({...formData, name: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-rose-600" /></div>
+        <div><label className="block text-sm font-bold text-stone-700 mb-2">Username Login</label><input required type="text" value={formData.username} onChange={e=>setFormData({...formData, username: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-rose-600" /></div>
+        <div><label className="block text-sm font-bold text-stone-700 mb-2">Password Akses</label><input required type="text" value={formData.password} onChange={e=>setFormData({...formData, password: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-rose-600" /></div>
+        <button type="submit" className="w-full py-4 bg-stone-900 text-white rounded-xl font-bold hover:bg-black mt-6 shadow-xl active:scale-95 text-lg">Ajukan Pergantian Data</button>
+      </form>
+    </div>
+  );
+};
+
+const AdminSystemSettings = () => {
+  const { db, updateDb, showToast, loggedInUser, requireApproval, compressImage, uploadImageToServer } = useContext(AppStateContext);
+  const [bConfig, setBConfig] = useState(db.brandConfig);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleSaveBrand = (e) => { e.preventDefault(); updateDb('brandConfig', bConfig); showToast('Konfigurasi Toko Disimpan.', 'success'); };
+  const updateSocial = (index, field, val) => { const newS = [...bConfig.socialMedia]; newS[index][field] = val; setBConfig({...bConfig, socialMedia: newS}); };
+  
+  const handleLogoUpload = async (e) => { 
+    const file = e.target.files[0]; 
+    if (!file) return; 
+    setIsUploading(true);
+    showToast('Mengkompresi gambar logo...', 'info');
+    const compressed = await compressImage(file);
+    const url = await uploadImageToServer(compressed);
+    setBConfig({...bConfig, logoUrl: url}); 
+    setIsUploading(false);
+    showToast('Logo berhasil disiapkan.', 'success');
+  };
+
+  const handlePasswordReset = (userId, newPassword) => {
+    const newUsers = db.users.map(u => u.id === userId ? { ...u, password: newPassword } : u);
+    updateDb('users', newUsers);
+    showToast(`Password staf berhasil diubah!`, 'success');
+  };
+
+  return (
+    <div className="space-y-8 w-full animate-fade-in-down">
+      <div className="bg-white p-6 md:p-10 rounded-3xl border border-stone-200 shadow-sm w-full">
+         <h2 className="text-xl md:text-2xl font-serif font-bold mb-8 flex items-center gap-3 border-b border-stone-100 pb-5 text-stone-800"><SettingsIcon className="w-7 h-7 text-rose-600"/> Identitas Merek (Whitelabel)</h2>
+         <form onSubmit={handleSaveBrand} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            <div className="md:col-span-2 flex flex-col sm:flex-row items-start sm:items-center gap-6 mb-2">
+              {bConfig.logoUrl ? <img src={bConfig.logoUrl} className="w-24 h-24 object-contain border border-stone-200 rounded-2xl shadow-sm bg-stone-50 p-2" alt="Logo" /> : <div className="w-24 h-24 bg-stone-100 border border-stone-200 rounded-2xl flex items-center justify-center shadow-sm"><ImageIcon className="w-8 h-8 text-stone-400"/></div>}
+              <div>
+                <label className="block text-sm font-bold text-stone-700 mb-2">Logo Perusahaan (Gambar/PNG)</label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="flex items-center justify-center px-5 py-3 border border-stone-300 rounded-xl cursor-pointer hover:bg-stone-50 text-sm font-bold text-stone-600 bg-white shadow-sm w-max transition-colors"><Upload className="w-4 h-4 mr-2" /> {isUploading ? 'Uploading...' : 'Upload Foto Logo'}<input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" /></label>
+                  {bConfig.logoUrl && <button type="button" onClick={() => setBConfig({...bConfig, logoUrl: ''})} className="px-5 py-3 rounded-xl bg-red-50 text-red-600 font-bold text-sm hover:bg-red-100 transition-colors">Hapus Logo</button>}
+                </div>
+              </div>
+            </div>
+
+            <div><label className="block text-sm font-bold text-stone-700 mb-2">Nama Aplikasi</label><input type="text" value={bConfig.appName} onChange={e=>setBConfig({...bConfig, appName: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
+            <div><label className="block text-sm font-bold text-stone-700 mb-2">Warna Tema Utama</label><select value={bConfig.themeColor} onChange={e=>setBConfig({...bConfig, themeColor: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none"><option value="rose">Rose (Default)</option><option value="amber">Dark Gold / Amber</option><option value="slate">Monochrome Slate</option><option value="emerald">Emerald Green</option></select></div>
+            <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Slogan Hero Banner</label><input type="text" value={bConfig.slogan} onChange={e=>setBConfig({...bConfig, slogan: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
+            <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Biografi Perusahaan</label><textarea rows="3" value={bConfig.companyBio} onChange={e=>setBConfig({...bConfig, companyBio: e.target.value})} className="w-full px-5 py-4 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
+            <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Email Bisnis</label><input type="email" value={bConfig.companyEmail} onChange={e=>setBConfig({...bConfig, companyEmail: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
+            
+            <div className="md:col-span-2 bg-stone-50 p-6 rounded-2xl border border-stone-200 mt-4">
+              <div className="flex justify-between items-center mb-6"><label className="block text-base font-serif font-bold text-stone-800">Jejaring Sosial Dinamis</label><button type="button" onClick={()=>setBConfig({...bConfig, socialMedia: [...bConfig.socialMedia, {type: 'Instagram', value: '', label: ''}]})} className="text-xs bg-stone-900 text-white px-4 py-2.5 rounded-lg font-bold shadow-md hover:bg-black">+ Akun Baru</button></div>
+              <div className="space-y-4">
+                {bConfig.socialMedia.map((soc, i) => (
+                  <div key={i} className="flex flex-col sm:flex-row gap-3 items-start sm:items-center bg-white p-3 rounded-xl border border-stone-100 shadow-sm">
+                    <select value={soc.type} onChange={e=>updateSocial(i, 'type', e.target.value)} className="w-full sm:w-40 px-4 py-3 bg-stone-50 border border-stone-200 rounded-lg text-sm font-bold outline-none"><option>WhatsApp</option><option>Instagram</option><option>TikTok</option></select>
+                    <input type="text" placeholder="Username / No HP / Link URL" value={soc.value} onChange={e=>updateSocial(i, 'value', e.target.value)} className="w-full flex-1 px-4 py-3 bg-stone-50 border border-stone-200 rounded-lg outline-none" />
+                    <button type="button" onClick={() => setBConfig({...bConfig, socialMedia: bConfig.socialMedia.filter((_, idx) => idx !== i)})} className="w-full sm:w-auto p-3 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 border border-red-100"><Trash2 className="w-5 h-5"/></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="md:col-span-2 flex justify-end mt-6"><button type="submit" className="w-full md:w-auto bg-stone-900 text-white px-10 py-4 rounded-xl font-bold shadow-xl active:scale-95 text-lg">Simpan Konfigurasi</button></div>
+         </form>
+      </div>
+
+      <div className="bg-white p-6 md:p-10 rounded-3xl border border-stone-200 shadow-sm w-full overflow-hidden">
+         <h2 className="text-xl md:text-2xl font-serif font-bold mb-8 flex items-center gap-3 border-b border-stone-100 pb-5 text-stone-800"><Users className="w-7 h-7 text-rose-600"/> Kendali Staf (HR)</h2>
+         <div className="w-full overflow-x-auto">
+           <table className="w-full text-left min-w-[700px] border-collapse">
+             <thead><tr className="text-xs font-bold text-stone-400 uppercase tracking-wider border-b border-stone-200 bg-stone-50"><th className="p-4 rounded-tl-xl">Identitas Staf</th><th className="p-4">Username Login</th><th className="p-4">Ubah Password</th><th className="p-4 text-right rounded-tr-xl">Pangkat Akses (Role)</th></tr></thead>
+             <tbody className="divide-y divide-stone-100">
+               {db.users.filter(u => u.role !== 'developer').map(u => (
+                 <tr key={u.id} className="hover:bg-stone-50/50 transition-colors">
+                   <td className="p-4 font-bold text-stone-800 text-base">{u.name} {u.id === loggedInUser?.id && <span className="text-[10px] bg-stone-800 text-white px-2.5 py-1 rounded-md ml-3 uppercase tracking-widest shadow-sm">Anda</span>}</td>
+                   <td className="p-4 text-sm font-mono text-stone-500">{u.username}</td>
+                   <td className="p-4">
+                     <input type="text" placeholder="Ketik password baru..." onBlur={(e) => { if(e.target.value.trim()) { handlePasswordReset(u.id, e.target.value.trim()); e.target.value=''; } }} className="px-4 py-2 border border-stone-200 bg-white rounded-lg text-sm outline-none focus:border-rose-500 w-full max-w-[180px] shadow-sm" />
+                   </td>
+                   <td className="p-4 text-right">
+                      <select value={u.role} disabled={u.id === loggedInUser?.id} onChange={(e) => { requireApproval('UPDATE_USER', {...u, role: e.target.value}, 'Otoritas diubah.', true); showToast(`Email dikirim ke staf.`, 'info'); }} className="px-4 py-2.5 border border-stone-300 rounded-xl text-sm font-bold bg-white outline-none focus:ring-2 focus:ring-rose-500 disabled:opacity-40 shadow-sm cursor-pointer">
+                        <option value="admin">Admin Kasir (Staf)</option><option value="manager">Manager Operasional</option><option value="owner">Owner (Hak Penuh)</option>
+                      </select>
+                   </td>
+                 </tr>
+               ))}
+             </tbody>
+           </table>
+         </div>
+      </div>
+    </div>
+  );
+};
+
+const AdminLogs = () => {
+  const { db } = useContext(AppStateContext);
+  return (
+    <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden animate-fade-in-down w-full">
+      <div className="p-8 border-b border-stone-100 bg-stone-50">
+         <h2 className="text-xl font-serif font-bold flex items-center gap-3 text-stone-800"><ClipboardList className="w-6 h-6 text-stone-500"/> Audit Trail (Log Sistem)</h2>
+         <p className="text-sm text-stone-500 mt-2">Pemantauan riwayat absolut khusus untuk tingkat Owner & Developer.</p>
+      </div>
+      <div className="overflow-x-auto w-full">
+         <table className="w-full text-left border-collapse min-w-[800px]">
+            <thead><tr className="bg-white text-stone-400 font-bold border-b border-stone-200 text-xs uppercase tracking-wider"><th className="p-5">Waktu Kejadian</th><th className="p-5">Aktor (User)</th><th className="p-5">Kategori</th><th className="p-5">Detail Perubahan</th></tr></thead>
+            <tbody className="divide-y divide-stone-100">
+               {db.logs?.length === 0 ? <tr><td colSpan="4" className="text-center py-16 text-stone-500 font-medium bg-stone-50">Belum ada riwayat aktivitas tercatat.</td></tr> :
+                db.logs?.map(log => (
+                   <tr key={log.id} className="hover:bg-stone-50/80 transition-colors">
+                      <td className="p-5 text-xs font-mono text-stone-500">{log.timestamp}</td>
+                      <td className="p-5 font-bold text-stone-800 text-base">{log.user}</td>
+                      <td className="p-5"><span className="bg-stone-100 border border-stone-200 px-3 py-1.5 rounded-lg text-xs font-bold text-stone-600 shadow-sm uppercase tracking-wider">{log.action}</span></td>
+                      <td className="p-5 text-sm text-stone-700 font-medium">{log.detail}</td>
+                   </tr>
+                ))
+               }
+            </tbody>
+         </table>
+      </div>
+    </div>
+  );
+};
+
+const AdminDeveloperPanel = () => {
+  const { db, updateDb, exportData, importData, showToast } = useContext(AppStateContext);
+  const handleFileUpload = (e) => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (event) => { importData(event.target.result); e.target.value = null; }; reader.readAsText(file); };
+  
+  const handleRoleChange = (userId, newRole) => { 
+    const newUsers = db.users.map(u => u.id === userId ? { ...u, role: newRole } : u); 
+    updateDb('users', newUsers); 
+    showToast(`Otoritas di-override oleh Developer.`, 'success'); 
+  };
+  
+  const handlePasswordOverride = (userId, newPassword) => {
+    const newUsers = db.users.map(u => u.id === userId ? { ...u, password: newPassword } : u);
+    updateDb('users', newUsers);
+    showToast(`Password berhasil dijebol & diganti!`, 'success');
+  };
+
+  return (
+    <div className="space-y-6 md:space-y-8 animate-fade-in-down w-full font-mono">
+      <div className="bg-[#0f172a] p-6 md:p-10 rounded-3xl shadow-2xl text-emerald-50 relative overflow-hidden border border-emerald-900/30">
+         <div className="absolute top-0 right-0 p-10 opacity-5 pointer-events-none"><Terminal className="w-64 h-64 md:w-96 md:h-96 text-emerald-400" /></div>
+         <h2 className="text-2xl md:text-3xl font-bold mb-3 flex items-center gap-4 text-emerald-400"><Terminal className="w-8 h-8"/> DEVELOPER ROOT CONSOLE</h2>
+         <p className="text-emerald-200/60 mb-10 max-w-3xl text-sm leading-relaxed">Peringatan: Area ini menembus semua pembatasan enkripsi dan RBAC. Perubahan data terjadi langsung di memori state tanpa melalui Middleware Persetujuan.</p>
+         
+         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 relative z-10">
+            <div className="bg-[#1e293b] p-6 md:p-8 rounded-2xl border border-emerald-500/20 shadow-inner">
+               <h3 className="text-base font-bold mb-6 flex items-center gap-3 text-emerald-300"><Database className="w-5 h-5"/> MANAJEMEN DATABASE RAW</h3>
+               <div className="space-y-4">
+                  <button onClick={exportData} className="w-full flex justify-between items-center px-5 py-4 bg-[#0f172a] hover:bg-black rounded-xl transition-colors border border-emerald-900/50"><span className="font-bold text-sm text-emerald-400">Download State (JSON)</span><Download className="w-5 h-5 text-emerald-500"/></button>
+                  <label className="w-full flex justify-between items-center px-5 py-4 bg-[#0f172a] hover:bg-black rounded-xl transition-colors cursor-pointer border border-emerald-900/50"><span className="font-bold text-sm text-emerald-400">Force Restore State (JSON)</span><UploadCloud className="w-5 h-5 text-emerald-500"/><input type="file" accept=".json" className="hidden" onChange={handleFileUpload} /></label>
+               </div>
+            </div>
+            <div className="bg-[#1e293b] p-6 md:p-8 rounded-2xl border border-emerald-500/20 shadow-inner">
+               <h3 className="text-base font-bold mb-6 flex items-center gap-3 text-emerald-300"><UploadCloud className="w-5 h-5"/> VERSI SISTEM APLIKASI</h3>
+               <div className="space-y-4">
+                  <div className="px-5 py-4 bg-[#0f172a] rounded-xl flex justify-between items-center border border-emerald-900/50"><span className="text-sm font-bold text-emerald-500">Versi Build Aktif</span><span className="text-xs bg-emerald-900 text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-700">v6.1.0-stable</span></div>
+                  <button onClick={() => showToast('Mem-bypass limit HTTP...', 'success')} className="w-full py-4 bg-emerald-600 text-white hover:bg-emerald-500 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-emerald-900/50">Ping Git Repository Server</button>
+               </div>
+            </div>
+         </div>
+
+         <div className="mt-8 bg-[#1e293b] p-6 md:p-8 rounded-2xl border border-emerald-500/20 relative z-10 shadow-inner">
+            <h3 className="text-base font-bold mb-6 flex items-center gap-3 text-emerald-300"><ImageIcon className="w-5 h-5 text-emerald-400"/> OVERRIDE LOGO & ICON APLIKASI</h3>
+            <div className="flex gap-4">
+              <input type="text" placeholder="Masukkan Emoji Ikon Aplikasi..." maxLength="2" value={db.brandConfig?.appIcon || ''} onChange={(e) => updateDb('brandConfig', {...db.brandConfig, appIcon: e.target.value})} className="w-full md:w-1/3 px-4 py-3 bg-[#0f172a] border border-emerald-700 text-emerald-300 rounded-lg text-lg outline-none focus:border-emerald-400 transition-colors" />
+              <button onClick={()=>showToast('Ikon Global diupdate', 'success')} className="px-6 py-3 bg-emerald-600 text-white hover:bg-emerald-500 rounded-lg font-bold text-sm transition-colors shadow-lg shadow-emerald-900/50">Setel Ikon</button>
+            </div>
+         </div>
+
+         <div className="mt-8 bg-[#1e293b] p-6 md:p-8 rounded-2xl border border-red-500/30 relative z-10 shadow-inner">
+            <h3 className="text-base font-bold mb-6 flex items-center gap-3 text-red-400"><Shield className="w-5 h-5"/> PAKSA UBAH OTORITAS & KREDENSIAL (BYPASS)</h3>
+            <div className="w-full overflow-x-auto">
+              <table className="w-full text-left min-w-[700px] border-collapse">
+                 <thead><tr className="border-b border-emerald-900/50 text-xs text-emerald-500 tracking-widest"><th className="pb-4">NAMA OBJEK (USER)</th><th className="pb-4">PAKSA UBAH PASSWORD</th><th className="pb-4 text-right">TINGKAT AKSES SAAT INI</th></tr></thead>
+                 <tbody className="divide-y divide-emerald-900/30">
+                   {db.users.map(u => (
+                     <tr key={`dev-${u.id}`}>
+                       <td className="py-4 text-sm font-bold text-emerald-100">{u.name} {u.role === 'developer' && <span className="text-[10px] ml-3 bg-red-900/80 text-red-300 px-2 py-1 rounded border border-red-700">Root Access</span>}</td>
+                       <td className="py-4">
+                         <input type="text" placeholder="Paksa password baru..." onBlur={(e) => { if(e.target.value.trim()) { handlePasswordOverride(u.id, e.target.value.trim()); e.target.value=''; } }} className="px-4 py-2 bg-[#0f172a] border border-red-700/50 text-red-300 rounded-lg text-sm outline-none focus:border-red-500 placeholder-red-900/50 w-full max-w-[200px]" />
+                       </td>
+                       <td className="py-4 text-right">
+                          <select value={u.role} disabled={u.role === 'developer'} onChange={(e) => handleRoleChange(u.id, e.target.value)} className="px-4 py-2 bg-[#0f172a] border border-emerald-700 text-emerald-300 rounded-lg text-sm outline-none focus:border-emerald-400 cursor-pointer disabled:opacity-40 transition-colors">
+                            <option value="admin">Admin Kasir</option><option value="manager">Manager</option><option value="owner">Owner</option>{u.role === 'developer' && <option value="developer">Developer</option>}
+                          </select>
+                       </td>
+                     </tr>
+                   ))}
+                 </tbody>
+               </table>
+            </div>
+         </div>
+      </div>
+    </div>
+  );
+};
+
+export default function App() { return <AppStateProvider><AppContent /></AppStateProvider>; }
+const AppContent = () => {
+  const { view, loggedInUser, isDbLoading } = useContext(AppStateContext);
+  if (isDbLoading) return <SplashScreen />;
+  if (view === 'admin') return loggedInUser ? <AdminLayout /> : <AdminLogin />;
+  return <CustomerLayout>{view === 'dashboard' ? <DashboardView /> : view === 'catalog' ? <CatalogView /> : view === 'cart' ? <CartView /> : view === 'checkout' ? <CheckoutView /> : view === 'success' ? <SuccessView /> : view === 'member_auth' ? <MemberAuthView /> : view === 'member_profile' ? <MemberProfileView /> : <CatalogView />}</CustomerLayout>;
+};
