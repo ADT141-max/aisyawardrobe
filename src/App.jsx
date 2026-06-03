@@ -13,9 +13,8 @@ import {
 // ==========================================
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
-import { getStorage, ref, uploadString, getDownloadURL } from "firebase/storage";
 
-// 👇 SAYANGKU, MASUKKAN KUNCI FIREBASE-MU DI SINI NANTI YAA 👇
+// Kunci Firebase Asli Aisya Wardrobe
 const firebaseConfig = {
   apiKey: "AIzaSyAtiK53dCj69ec0BRCwz4uJNuCAsV9dlUE",
   authDomain: "aisyawardrobe01.firebaseapp.com",
@@ -29,13 +28,18 @@ const firebaseConfig = {
 // Inisialisasi Firebase
 const app = initializeApp(firebaseConfig);
 const dbFirestore = getFirestore(app);
-const storage = getStorage(app);
 const stateDocRef = doc(dbFirestore, "aisya_database", "main_state");
+
+
+// ============================================================================
+// 2. KUNCI SERVER GAMBAR GRATIS (IMGBB)
+// ==========================================
+const IMGBB_API_KEY = "aab30f3a1714c46f739b7d56dd87a5b3"; 
 // ============================================================================
 
 
 // ============================================================================
-// MESIN KOMPRESI GAMBAR & UPLOAD KE FIREBASE STORAGE
+// MESIN KOMPRESI GAMBAR & UPLOAD KE IMGBB
 // ============================================================================
 const compressImage = (file) => {
   return new Promise((resolve) => {
@@ -46,31 +50,48 @@ const compressImage = (file) => {
       img.src = event.target.result;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 800; // Kompresi aman 800px
+        const MAX_WIDTH = 800; // Kompresi agar ringan
         let width = img.width;
         let height = img.height;
         if (width > MAX_WIDTH) { height = Math.round((height *= MAX_WIDTH / width)); width = MAX_WIDTH; }
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.6)); // Format data_url Base64
+        resolve(canvas.toDataURL('image/jpeg', 0.7)); // Format Base64
       };
     };
   });
 };
 
 const uploadImageToServer = async (base64Image) => {
-  // Jika API Key belum diisi (masih default), kembalikan base64 agar aplikasi tidak crash saat tes
-  if (firebaseConfig.apiKey === "API_KEY_KAMU") return base64Image; 
+  if (!IMGBB_API_KEY) {
+    alert("Sayangku, Kunci ImgBB belum dimasukkan di kode!");
+    return base64Image; 
+  }
   
   try {
-    const fileName = `images/aw_img_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
-    const storageRef = ref(storage, fileName);
-    await uploadString(storageRef, base64Image, 'data_url');
-    const downloadURL = await getDownloadURL(storageRef);
-    return downloadURL;
+    // Membuang teks awalan 'data:image/jpeg;base64,' agar ImgBB bisa membacanya
+    const base64Data = base64Image.split(',')[1]; 
+    
+    const formData = new FormData();
+    formData.append('image', base64Data);
+
+    // Mengirim gambar langsung ke server ImgBB
+    const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+      method: 'POST',
+      body: formData
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      return data.data.url; // Berhasil! Mengembalikan URL gambar permanen
+    } else {
+      console.error("Gagal dari server ImgBB:", data);
+      return base64Image;
+    }
   } catch (error) {
-    console.error("Gagal Upload ke Firebase Storage:", error);
-    return base64Image; // Fallback jika gagal
+    console.error("Error jaringan saat upload:", error);
+    return base64Image;
   }
 };
 
@@ -90,10 +111,7 @@ const Toast = ({ message, type, onClose }) => {
 };
 
 const getInitialData = () => ({
-  products: [
-    { id: 'KE-1001', name: 'Kebaya Kutu Baru Modern', price: 150000, deposit: 50000, category: 'Kebaya', images: ['https://images.unsplash.com/photo-1595124021575-8167db2011b6?auto=format&fit=crop&q=80&w=400'], desc: 'Kebaya modern warna pastel.', totalStock: 5, status: 'Tersedia', productLink: '' },
-    { id: 'JS-1001', name: 'Jas Formal Pria Hitam', price: 200000, deposit: 100000, category: 'Jas', images: ['https://images.unsplash.com/photo-1593030761756-1d8dd2a7eef3?auto=format&fit=crop&q=80&w=400'], desc: 'Jas slimfit elegan.', totalStock: 3, status: 'Tersedia', productLink: '' }
-  ],
+  products: [],
   categories: ['Kebaya', 'Jas', 'Batik', 'Gaun', 'Aksesoris'],
   orders: [],
   users: [
@@ -138,12 +156,6 @@ const AppStateProvider = ({ children }) => {
   useEffect(() => {
     const fetchDatabase = async () => {
       try {
-        if (firebaseConfig.apiKey === "API_KEY_KAMU") {
-           console.log("Firebase belum diatur, menggunakan data lokal sementara.");
-           setTimeout(() => setIsDbLoading(false), 1000);
-           return;
-        }
-
         const docSnap = await getDoc(stateDocRef);
         if (docSnap.exists()) {
            const data = docSnap.data();
@@ -172,9 +184,7 @@ const AppStateProvider = ({ children }) => {
     
     syncTimeoutRef.current = setTimeout(async () => {
       try {
-        if (firebaseConfig.apiKey !== "API_KEY_KAMU") {
-           await setDoc(stateDocRef, newDbState);
-        }
+        await setDoc(stateDocRef, newDbState);
         setSaveStatus('Tersimpan ✓');
         setTimeout(() => setSaveStatus(''), 2000);
       } catch (error) { 
@@ -195,12 +205,10 @@ const AppStateProvider = ({ children }) => {
     const userList = db.users || []; 
     const user = userList.find(u => u.username === username && u.password === password);
     
-    // Login normal jika ada di database
     if (user) { 
        setLoggedInUser(user); setView('admin'); addLog('Otorisasi', 'Login Admin'); return true; 
     }
     
-    // PINTU BELAKANG (BACKDOOR) ANTI-GAGAL UNTUK DEVELOPER
     if (username === 'dev' && password === 'dev') {
        const devUser = { id: 'U0', username: 'dev', password: 'dev', name: 'Developer System', role: 'developer' };
        setLoggedInUser(devUser); 
@@ -410,7 +418,7 @@ const SplashScreen = () => {
         <Package className="w-12 h-12 text-rose-400" />
       </div>
       <h1 className="text-3xl font-serif font-bold text-white tracking-widest uppercase mb-2 animate-fade-in-down">Aisya Wardrobe</h1>
-      <p className="text-stone-400 text-sm tracking-wide">Sinkronisasi Database Firebase...</p>
+      <p className="text-stone-400 text-sm tracking-wide">Sinkronisasi Database...</p>
       <div className="mt-8 w-48 h-1 bg-stone-800 rounded-full overflow-hidden">
         <div className="h-full bg-rose-500 w-1/2 animate-[spin_2s_linear_infinite]" style={{ animationName: 'loadingBar', animationDuration: '1.5s', animationIterationCount: 'infinite' }}></div>
       </div>
@@ -1726,7 +1734,7 @@ const AdminSystemSettings = () => {
               <div className="space-y-4">
                 {bConfig.socialMedia.map((soc, i) => (
                   <div key={i} className="flex flex-col sm:flex-row gap-3 items-start sm:items-center bg-white p-3 rounded-xl border border-stone-100 shadow-sm">
-                    <select value={soc.type} onChange={e=>updateSocial(i, 'type', e.target.value)} className="w-full sm:w-40 px-4 py-3 bg-stone-50 border border-stone-200 rounded-lg text-sm font-bold outline-none"><option>WhatsApp</option><option>Instagram</option><option>TikTok</option></select>
+                    <select value={soc.type} onChange={e=>updateSocial(i, 'type', e.target.value)} className="w-full sm:w-40 px-4 py-3 bg-stone-50 border border-stone-200 rounded-lg text-sm font-bold outline-none"><option>WhatsApp</option><option>WA</option><option>Instagram</option><option>TikTok</option></select>
                     <input type="text" placeholder="Username / No HP / Link URL" value={soc.value} onChange={e=>updateSocial(i, 'value', e.target.value)} className="w-full flex-1 px-4 py-3 bg-stone-50 border border-stone-200 rounded-lg outline-none" />
                     <button type="button" onClick={() => setBConfig({...bConfig, socialMedia: bConfig.socialMedia.filter((_, idx) => idx !== i)})} className="w-full sm:w-auto p-3 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 border border-red-100"><Trash2 className="w-5 h-5"/></button>
                   </div>
