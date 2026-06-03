@@ -128,16 +128,29 @@ const AppStateProvider = ({ children }) => {
   };
   const cTheme = themeColors[db.brandConfig?.themeColor] || themeColors.rose;
 
-  // Real-time Database Listener
+  // Real-time Database Listener (Strict Synchronization)
   useEffect(() => {
     const unsubscribe = onSnapshot(stateDocRef, (docSnap) => {
       if (docSnap.exists()) {
-         const data = docSnap.data();
-         setDb(prev => ({
-            ...prev, ...data, 
-            users: data.users && data.users.length > 0 ? data.users : prev.users,
-            categories: data.categories && data.categories.length > 0 ? data.categories : prev.categories
-         }));
+         const serverData = docSnap.data();
+         
+         // Pastikan struktur array tidak pernah terhapus
+         if(!serverData.users) serverData.users = getInitialData().users;
+         if(!serverData.categories) serverData.categories = getInitialData().categories;
+
+         // Timpa seluruh state secara mutlak dengan kebenaran dari Server
+         setDb(serverData);
+         
+         // Sinkronisasi paksa akun yang sedang login jika datanya diubah dari device lain
+         setLoggedInUser(prev => {
+            if (!prev) return null;
+            return serverData.users.find(u => u.id === prev.id) || null;
+         });
+         setLoggedInMember(prev => {
+            if (!prev) return null;
+            return serverData.members.find(m => m.id === prev.id) || null;
+         });
+         
       } else {
          setDoc(stateDocRef, getInitialData());
       }
@@ -150,9 +163,11 @@ const AppStateProvider = ({ children }) => {
   }, []);
 
   const saveToDatabase = async (newDbState) => {
+    // 1. Update UI secara instan (Optimistic Update)
     setDb(newDbState); 
     setSaveStatus('Menyimpan...');
     try {
+      // 2. Tembak ke server
       await setDoc(stateDocRef, newDbState);
       setSaveStatus('Tersimpan ✓');
       setTimeout(() => setSaveStatus(''), 2000);
@@ -772,11 +787,17 @@ const MemberAuthView = () => {
     if (file) {
       setIsUploading(prev => ({ ...prev, [type]: true }));
       showToast(`Mengunggah gambar...`, 'info');
-      const compressed = await compressImage(file);
-      const serverUrl = await uploadImageToServer(compressed);
-      setFormData(prev => ({ ...prev, [type]: serverUrl }));
-      showToast(`Gambar OK`, 'success');
-      setIsUploading(prev => ({ ...prev, [type]: false }));
+      
+      try {
+        const compressed = await compressImage(file);
+        const serverUrl = await uploadImageToServer(compressed);
+        setFormData(prev => ({ ...prev, [type]: serverUrl }));
+        showToast(`Gambar OK`, 'success');
+      } catch (error) {
+        showToast(`Gagal mengunggah gambar`, 'error');
+      } finally {
+        setIsUploading(prev => ({ ...prev, [type]: false }));
+      }
     }
   };
 
@@ -994,6 +1015,11 @@ const AdminLayout = () => {
              <h1 className="text-xl md:text-2xl font-bold font-serif text-stone-800 capitalize truncate">{activeTab.replace('-', ' ')}</h1>
            </div>
            <div className="flex items-center gap-4">
+             {/* Indikator Realtime Sync */}
+             <div className="hidden sm:flex items-center space-x-2 bg-stone-100 py-1.5 px-4 rounded-full border border-stone-200">
+               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+               <span className="text-xs font-bold text-stone-600 uppercase tracking-widest">Real-time Aktif</span>
+             </div>
              <div className="text-right hidden sm:block"><p className="text-sm font-bold text-stone-800">{loggedInUser.name}</p></div>
              <div className="w-10 h-10 bg-stone-100 rounded-full flex items-center justify-center border border-stone-200"><User className="w-5 h-5 text-stone-600"/></div>
            </div>
@@ -1061,7 +1087,7 @@ const AdminOrderManager = () => {
     let refund = (dendaModal.order.totalDeposit || 0) - denda;
     if (refund < 0) refund = 0;
     
-    requireApproval('UPDATE_ORDER', { id: dendaModal.order.id, status: dendaModal.newStatus, denda, refund }, `Status pesanan ${dendaModal.order.id} diubah ke ${dendaModal.newStatus}.`);
+    requireApproval('UPDATE_ORDER', { id: dendaModal.order.id, status: dendaModal.newStatus, denda, refund }, `Status pesanan diubah ke ${dendaModal.newStatus}.`);
     dendaModal.order.items.forEach(item => requireApproval('UPDATE_PRODUCT_STATUS', { id: item.id, status: 'Maintenance' }, '', true));
     setDendaModal({ isOpen: false, order: null, amount: 0, newStatus: '' });
   };
@@ -1153,7 +1179,6 @@ const AdminOrderManager = () => {
         ))}
       </div>
 
-      {/* Denda Modal Custom */}
       {dendaModal.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm">
           <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-fade-in-down">
@@ -1191,20 +1216,26 @@ const AdminInventory = () => {
     const files = Array.from(e.target.files); 
     if (!files.length) return; 
     
-    showToast('Mengkompresi gambar...', 'info');
-    const compressedUrls = [];
-    for(let f of files) {
-      const compressed = await compressImage(f);
-      const url = await uploadImageToServer(compressed);
-      compressedUrls.push(url);
-    }
+    showToast('Mengkompresi & Mengunggah gambar...', 'info');
     
-    if (isEdit) {
-      setEditData(prev => ({ ...prev, images: [...(prev.images || []), ...compressedUrls] }));
-    } else {
-      setFormData(prev => ({ ...prev, images: [...(prev.images || []), ...compressedUrls] }));
+    try {
+      // Parallel upload to make it blazing fast
+      const uploadPromises = files.map(async (f) => {
+        const compressed = await compressImage(f);
+        return await uploadImageToServer(compressed);
+      });
+      
+      const compressedUrls = await Promise.all(uploadPromises);
+      
+      if (isEdit) {
+        setEditData(prev => ({ ...prev, images: [...(prev.images || []), ...compressedUrls] }));
+      } else {
+        setFormData(prev => ({ ...prev, images: [...(prev.images || []), ...compressedUrls] }));
+      }
+      showToast('Gambar berhasil diunggah!', 'success');
+    } catch (error) {
+      showToast('Gagal mengunggah gambar', 'error');
     }
-    showToast('Gambar OK', 'success');
   };
 
   const removeImage = (idx, isEdit = false) => {
@@ -1668,6 +1699,9 @@ const AdminSystemSettings = () => {
   const { db, updateDb, showToast, loggedInUser, requireApproval, compressImage, uploadImageToServer } = useContext(AppStateContext);
   const [bConfig, setBConfig] = useState(db.brandConfig);
   const [isUploading, setIsUploading] = useState(false);
+
+  // Sync state dynamically if DB updates from another device
+  useEffect(() => { setBConfig(db.brandConfig); }, [db.brandConfig]);
 
   const handleSaveBrand = (e) => { e.preventDefault(); updateDb('brandConfig', bConfig); showToast('Konfigurasi Toko Disimpan.', 'success'); };
   const updateSocial = (index, field, val) => { const newS = [...bConfig.socialMedia]; newS[index][field] = val; setBConfig({...bConfig, socialMedia: newS}); };
