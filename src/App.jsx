@@ -75,6 +75,18 @@ const AppStateContext = createContext();
 
 const formatRupiah = (number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number || 0);
 
+// Helper pengubah text sosmed menjadi Smart Link
+const getSocialLink = (type, value) => {
+  if (!value) return '#';
+  const cleanValue = value.replace('@', '').trim();
+  const t = type.toLowerCase();
+  if (t.includes('wa') || t.includes('whatsapp')) return `https://wa.me/${value.replace(/\D/g, '')}`;
+  if (t.includes('instagram') || t.includes('ig')) return `https://instagram.com/${cleanValue}`;
+  if (t.includes('tiktok')) return `https://tiktok.com/@${cleanValue}`;
+  if (value.startsWith('http')) return value;
+  return '#'; // Fallback
+};
+
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => { const timer = setTimeout(() => onClose(), 3000); return () => clearTimeout(timer); }, [onClose]);
   return (
@@ -229,7 +241,6 @@ const AppStateProvider = ({ children }) => {
       case 'DELETE_CATEGORY': newDb.categories = (newDb.categories||[]).filter(c => c !== payload); actStr='Kategori'; detStr=`Hapus: ${payload}`; break;
       case 'UPDATE_ORDER': newDb.orders = (newDb.orders||[]).map(o => o.id === payload.id ? { ...o, status: payload.status, denda: payload.denda||0, totalRefundDeposit: payload.refund||0 } : o); actStr='Pesanan'; detStr=`Status ${payload.id} -> ${payload.status}`; break;
       
-      // BATCH UPDATE: Menyelesaikan/Membatalkan pesanan & mengubah semua baju ke Maintenance dalam SATU KALI SIMPAN
       case 'COMPLETE_ORDER': 
         newDb.orders = (newDb.orders||[]).map(o => o.id === payload.orderId ? { ...o, status: payload.newStatus, denda: payload.denda||0, totalRefundDeposit: payload.refund||0 } : o);
         newDb.products = (newDb.products||[]).map(p => payload.itemIds.includes(p.id) ? { ...p, status: 'Maintenance' } : p);
@@ -513,8 +524,10 @@ const CustomerLayout = ({ children }) => {
               <li className="flex items-center gap-3"><div className="w-8 h-8 rounded-full bg-stone-800 flex items-center justify-center text-stone-300"><FileText className="w-4 h-4"/></div> {db.brandConfig.companyEmail}</li>
               {(db.brandConfig.socialMedia || []).map((soc, idx) => (
                 <li key={`ft-soc-${idx}`} className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-stone-800 flex items-center justify-center text-stone-300"><span className="font-bold text-xs uppercase">{soc.type.charAt(0)}</span></div>
-                  <span className="font-medium text-stone-300">{soc.type}:</span> {soc.value}
+                  <a href={getSocialLink(soc.type, soc.value)} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors flex items-center gap-3 w-full">
+                    <div className="w-8 h-8 rounded-full bg-stone-800 flex items-center justify-center text-stone-300"><span className="font-bold text-xs uppercase">{soc.type.charAt(0)}</span></div>
+                    <span className="font-medium text-stone-300">{soc.type}:</span> <span className="underline decoration-stone-600 underline-offset-4">{soc.value}</span>
+                  </a>
                 </li>
               ))}
             </ul>
@@ -565,12 +578,25 @@ const CatalogView = () => {
   const { db, cart, addToCart, getAvailableStock, cTheme, loggedInMember, toggleWishlist } = useContext(AppStateContext);
   const [activeCategory, setActiveCategory] = useState('Semua');
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // State untuk Pop-up Detail Barang & Slider Gambar
+  const [selectedDetail, setSelectedDetail] = useState(null);
+  const [currentImgIdx, setCurrentImgIdx] = useState(0);
 
   const filteredProducts = (db.products||[]).filter(p => 
     p.status !== 'Maintenance' && 
     (activeCategory === 'Semua' || p.category === activeCategory) &&
     (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase()))
   );
+
+  const openDetail = (product) => {
+    setSelectedDetail(product);
+    setCurrentImgIdx(0);
+  };
+  
+  const closeDetail = () => {
+    setSelectedDetail(null);
+  };
 
   return (
     <div className="animate-fade-in-down">
@@ -593,8 +619,8 @@ const CatalogView = () => {
           const isWished = loggedInMember?.wishlist?.includes(product.id);
 
           return (
-            <div key={product.id} className="bg-white rounded-2xl shadow-sm border border-stone-100 overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col group relative">
-              <button onClick={() => toggleWishlist(product.id)} className="absolute top-4 left-4 z-10 p-2 bg-white/90 backdrop-blur rounded-full shadow-md hover:scale-110 transition-transform">
+            <div key={product.id} onClick={() => openDetail(product)} className="bg-white rounded-2xl shadow-sm border border-stone-100 overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col group relative cursor-pointer">
+              <button onClick={(e) => { e.stopPropagation(); toggleWishlist(product.id); }} className="absolute top-4 left-4 z-10 p-2 bg-white/90 backdrop-blur rounded-full shadow-md hover:scale-110 transition-transform">
                 <Heart className={`w-5 h-5 ${isWished ? 'fill-rose-500 text-rose-500' : 'text-stone-400'}`} />
               </button>
 
@@ -611,22 +637,91 @@ const CatalogView = () => {
                   {product.deposit > 0 && <p className="text-xs font-bold text-amber-600 bg-amber-50 inline-block px-2 py-1 rounded mt-2">+ Deposit: {formatRupiah(product.deposit)}</p>}
                 </div>
                 
-                {product.productLink && (
-                  <a href={product.productLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg mb-4 w-max transition-colors">
-                    <ExternalLink className="w-3 h-3"/> Lihat Referensi Eksternal
-                  </a>
-                )}
-                
                 <p className="text-sm text-stone-500 mb-6 line-clamp-2 font-light flex-grow">{product.desc}</p>
                 <div className="mt-auto pt-5 border-t border-stone-100 flex items-center justify-between">
                   <span className="text-sm text-stone-500 font-medium">Sisa: {avail}</span>
-                  <button onClick={() => addToCart(product)} disabled={!canAdd} className={`px-5 py-2.5 rounded-full font-bold transition-all active:scale-95 flex items-center gap-2 ${canAdd ? `${cTheme.bg} text-white shadow-md hover:shadow-lg` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}><ShoppingCart className="w-4 h-4" /> Sewa</button>
+                  <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} disabled={!canAdd} className={`px-5 py-2.5 rounded-full font-bold transition-all active:scale-95 flex items-center gap-2 ${canAdd ? `${cTheme.bg} text-white shadow-md hover:shadow-lg` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}><ShoppingCart className="w-4 h-4" /> Sewa</button>
                 </div>
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* Modal Detail Produk Mewah */}
+      {selectedDetail && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-stone-900/70 backdrop-blur-sm animate-fade-in-down" onClick={closeDetail}>
+           <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row shadow-2xl relative" onClick={e => e.stopPropagation()}>
+              
+              {/* Slider Gambar di Kiri */}
+              <div className="w-full md:w-1/2 h-64 md:h-auto bg-stone-100 relative group flex-shrink-0">
+                 <img src={selectedDetail.images?.[currentImgIdx] || 'https://placehold.co/400?text=No+Image'} className="w-full h-full object-cover" alt={selectedDetail.name} />
+                 {/* Tombol Geser (Maju/Mundur) Gambar */}
+                 {selectedDetail.images?.length > 1 && (
+                    <>
+                      <button onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(prev => prev === 0 ? selectedDetail.images.length - 1 : prev - 1); }} className="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-white/70 hover:bg-white rounded-full text-stone-800 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"><ChevronLeft className="w-5 h-5"/></button>
+                      <button onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(prev => prev === selectedDetail.images.length - 1 ? 0 : prev + 1); }} className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-white/70 hover:bg-white rounded-full text-stone-800 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"><ChevronRight className="w-5 h-5"/></button>
+                      
+                      {/* Indikator Titik Gambar */}
+                      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 bg-stone-900/30 px-3 py-1.5 rounded-full backdrop-blur-sm">
+                         {selectedDetail.images.map((_, idx) => (
+                            <button key={idx} onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(idx); }} className={`w-2 h-2 rounded-full transition-all ${idx === currentImgIdx ? 'bg-white w-4' : 'bg-white/50 hover:bg-white/80'}`} />
+                         ))}
+                      </div>
+                    </>
+                 )}
+                 <button onClick={closeDetail} className="absolute top-4 left-4 p-2 bg-white/90 backdrop-blur rounded-full md:hidden text-stone-800 shadow-sm"><X className="w-5 h-5"/></button>
+              </div>
+
+              {/* Rincian Detail di Kanan */}
+              <div className="w-full md:w-1/2 p-6 md:p-10 flex flex-col overflow-y-auto no-scrollbar">
+                  <div className="flex justify-between items-start mb-2">
+                      <span className="bg-stone-100 text-stone-600 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider mb-3 inline-block">{selectedDetail.category}</span>
+                      <button onClick={closeDetail} className="hidden md:block p-2 bg-stone-50 hover:bg-stone-100 rounded-full text-stone-500 transition-colors"><X className="w-5 h-5"/></button>
+                  </div>
+                  <h2 className="text-3xl font-serif font-bold text-stone-900 leading-tight mb-1">{selectedDetail.name}</h2>
+                  <p className="text-sm font-mono text-stone-400 mb-6">{selectedDetail.id}</p>
+                  
+                  <div className="mb-8 bg-stone-50 p-5 rounded-2xl border border-stone-100">
+                      <p className={`${cTheme.text} font-bold text-3xl mb-2`}>{formatRupiah(selectedDetail.price)} <span className="text-sm font-light text-stone-500">/ hari</span></p>
+                      {selectedDetail.deposit > 0 && <p className="text-xs font-bold text-amber-600 bg-amber-100/50 inline-block px-3 py-1.5 rounded-lg border border-amber-200">+ Deposit Jaminan: {formatRupiah(selectedDetail.deposit)}</p>}
+                  </div>
+
+                  <div className="mb-8">
+                      <h4 className="text-sm font-bold text-stone-800 uppercase tracking-wider mb-3 border-b border-stone-100 pb-2">Deskripsi Pakaian</h4>
+                      <p className="text-base text-stone-600 leading-relaxed font-light whitespace-pre-line">{selectedDetail.desc}</p>
+                  </div>
+
+                  {selectedDetail.productLink && (
+                      <a href={selectedDetail.productLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-2 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-5 py-3 rounded-xl mb-8 w-full transition-colors">
+                          <ExternalLink className="w-4 h-4"/> Lihat Referensi Eksternal / Video
+                      </a>
+                  )}
+
+                  <div className="mt-auto pt-6 border-t border-stone-100 space-y-4">
+                      <div className="flex items-center justify-between mb-2">
+                          <span className="text-stone-500 font-medium">Stok Tersedia Saat Ini:</span>
+                          <span className={`font-bold px-4 py-1.5 rounded-lg text-sm ${getAvailableStock(selectedDetail.id) > 0 ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                              {getAvailableStock(selectedDetail.id)} dari {selectedDetail.totalStock} Pcs
+                          </span>
+                      </div>
+                      <div className="flex gap-3">
+                          <button onClick={(e) => { e.stopPropagation(); toggleWishlist(selectedDetail.id); }} className={`p-4 rounded-xl border border-stone-200 flex items-center justify-center transition-colors ${loggedInMember?.wishlist?.includes(selectedDetail.id) ? 'bg-rose-50 border-rose-200' : 'hover:bg-stone-50'}`}>
+                              <Heart className={`w-6 h-6 ${loggedInMember?.wishlist?.includes(selectedDetail.id) ? 'fill-rose-500 text-rose-500' : 'text-stone-400'}`} />
+                          </button>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); addToCart(selectedDetail); closeDetail(); }} 
+                            disabled={getAvailableStock(selectedDetail.id) <= (cart.find(i => i.id === selectedDetail.id)?.quantity || 0)} 
+                            className={`flex-1 py-4 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 text-lg shadow-lg ${getAvailableStock(selectedDetail.id) > (cart.find(i => i.id === selectedDetail.id)?.quantity || 0) ? `${cTheme.bg} text-white hover:brightness-110` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}
+                          >
+                              <ShoppingCart className="w-5 h-5" /> Sewa Sekarang
+                          </button>
+                      </div>
+                  </div>
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1765,9 +1860,9 @@ const AdminSystemSettings = () => {
             <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Email Bisnis</label><input type="email" value={bConfig.companyEmail} onChange={e=>setBConfig({...bConfig, companyEmail: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
             
             <div className="md:col-span-2 bg-stone-50 p-6 rounded-2xl border border-stone-200 mt-4">
-              <div className="flex justify-between items-center mb-6"><label className="block text-base font-serif font-bold text-stone-800">Jejaring Sosial Dinamis</label><button type="button" onClick={()=>setBConfig({...bConfig, socialMedia: [...(bConfig.socialMedia||[]), {type: 'Instagram', value: '', label: ''}]})} className="text-xs bg-stone-900 text-white px-4 py-2.5 rounded-lg font-bold shadow-md hover:bg-black">+ Akun Baru</button></div>
+              <div className="flex justify-between items-center mb-6"><label className="block text-base font-serif font-bold text-stone-800">Jejaring Sosial Dinamis</label><button type="button" onClick={()=>setBConfig({...bConfig, socialMedia: [...(bConfig.socialMedia || []), {type: 'Instagram', value: '', label: ''}]})} className="text-xs bg-stone-900 text-white px-4 py-2.5 rounded-lg font-bold shadow-md hover:bg-black">+ Akun Baru</button></div>
               <div className="space-y-4">
-                {(bConfig.socialMedia||[]).map((soc, i) => (
+                {(bConfig.socialMedia || []).map((soc, i) => (
                   <div key={i} className="flex flex-col sm:flex-row gap-3 items-start sm:items-center bg-white p-3 rounded-xl border border-stone-100 shadow-sm">
                     <select value={soc.type} onChange={e=>updateSocial(i, 'type', e.target.value)} className="w-full sm:w-40 px-4 py-3 bg-stone-50 border border-stone-200 rounded-lg text-sm font-bold outline-none"><option>WhatsApp</option><option>WA</option><option>Instagram</option><option>TikTok</option></select>
                     <input type="text" placeholder="Username / No HP / Link URL" value={soc.value} onChange={e=>updateSocial(i, 'value', e.target.value)} className="w-full flex-1 px-4 py-3 bg-stone-50 border border-stone-200 rounded-lg outline-none" />
