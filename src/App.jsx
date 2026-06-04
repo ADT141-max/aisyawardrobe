@@ -5,7 +5,7 @@ import {
   AlertCircle, Search, Menu, LogOut, User, Settings as SettingsIcon, 
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Upload, Shield, 
   Briefcase, FileText, Database, Download, UploadCloud, Terminal,
-  UserPlus, Award, Gift, Users, Edit3, ClipboardList, Heart, Printer, MessageCircle, ExternalLink, Tag, Percent, MoreVertical
+  UserPlus, Award, Gift, Users, Edit3, ClipboardList, Heart, Printer, MessageCircle, ExternalLink, MoreVertical
 } from 'lucide-react';
 
 import { initializeApp } from "firebase/app";
@@ -72,6 +72,7 @@ const uploadImageToServer = async (base64Image) => {
 };
 
 const AppStateContext = createContext();
+
 const formatRupiah = (number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number || 0);
 
 const Toast = ({ message, type, onClose }) => {
@@ -87,20 +88,15 @@ const Toast = ({ message, type, onClose }) => {
 };
 
 const getInitialData = () => ({
-  products: [],
-  categories: ['Kebaya', 'Jas', 'Batik', 'Gaun', 'Aksesoris'],
-  orders: [],
+  products: [], categories: ['Kebaya', 'Jas', 'Batik', 'Gaun', 'Aksesoris'], orders: [],
   users: [
     { id: 'U0', username: 'dev', password: 'dev', name: 'Developer System', role: 'developer' },
     { id: 'U1', username: 'owner', password: 'owner123', name: 'Owner Aisya', role: 'owner' },
     { id: 'U2', username: 'manager', password: 'manager123', name: 'Manajer Operasional', role: 'manager' },
     { id: 'U3', username: 'admin', password: 'admin123', name: 'Admin Kasir', role: 'admin' }
   ],
-  members: [],
-  prizes: [{ id: 'PRZ-01', name: 'Voucher Rp 50k', points: 500, image: '', desc: 'Diskon sewa' }],
-  promos: [],
-  logs: [],
-  approvals: [],
+  members: [], prizes: [{ id: 'PRZ-01', name: 'Voucher Rp 50k', points: 500, image: '', desc: 'Diskon sewa' }],
+  promos: [], logs: [], approvals: [],
   brandConfig: {
     appName: 'Aisya Wardrobe', slogan: 'Sewa Pakaian Premium & Eksklusif', companyBio: 'Penyedia layanan sewa pakaian premium terpercaya untuk momen spesial Anda.',
     logoUrl: '', appIcon: '', themeColor: 'rose', companyEmail: 'admin@aisyawardrobe.com',
@@ -115,6 +111,7 @@ const AppStateProvider = ({ children }) => {
   const showToast = (message, type = 'success') => setToast({ message, type });
 
   const [db, setDb] = useState(getInitialData());
+
   const [view, setView] = useState('dashboard');
   const [cart, setCart] = useState([]);
   const [loggedInUser, setLoggedInUser] = useState(null);
@@ -128,129 +125,146 @@ const AppStateProvider = ({ children }) => {
   };
   const cTheme = themeColors[db.brandConfig?.themeColor] || themeColors.rose;
 
-  // Real-time Database Listener (Strict Synchronization)
+  // Real-time Firebase Link
   useEffect(() => {
     const unsubscribe = onSnapshot(stateDocRef, (docSnap) => {
       if (docSnap.exists()) {
          const serverData = docSnap.data();
-         
-         // Pastikan struktur array tidak pernah terhapus
          if(!serverData.users) serverData.users = getInitialData().users;
          if(!serverData.categories) serverData.categories = getInitialData().categories;
+         if(!serverData.orders) serverData.orders = [];
+         if(!serverData.products) serverData.products = [];
+         if(!serverData.members) serverData.members = [];
+         if(!serverData.approvals) serverData.approvals = [];
+         if(!serverData.logs) serverData.logs = [];
+         if(!serverData.prizes) serverData.prizes = [];
+         if(!serverData.promos) serverData.promos = [];
 
-         // Timpa seluruh state secara mutlak dengan kebenaran dari Server
          setDb(serverData);
          
-         // Sinkronisasi paksa akun yang sedang login jika datanya diubah dari device lain
-         setLoggedInUser(prev => {
-            if (!prev) return null;
-            return serverData.users.find(u => u.id === prev.id) || null;
-         });
-         setLoggedInMember(prev => {
-            if (!prev) return null;
-            return serverData.members.find(m => m.id === prev.id) || null;
-         });
-         
+         setLoggedInUser(prev => { if (!prev) return null; return serverData.users.find(u => u.id === prev.id) || null; });
+         setLoggedInMember(prev => { if (!prev) return null; return serverData.members.find(m => m.id === prev.id) || null; });
       } else {
          setDoc(stateDocRef, getInitialData());
       }
       setIsDbLoading(false);
-    }, (error) => { 
-      console.error("Firebase Sync Error:", error); 
-      setIsDbLoading(false); 
-    });
+    }, (error) => { console.error("Firebase Sync Error:", error); setIsDbLoading(false); });
     return () => unsubscribe();
   }, []);
 
   const saveToDatabase = async (newDbState) => {
-    // 1. Update UI secara instan (Optimistic Update)
     setDb(newDbState); 
     setSaveStatus('Menyimpan...');
     try {
-      // 2. Tembak ke server
       await setDoc(stateDocRef, newDbState);
       setSaveStatus('Tersimpan ✓');
       setTimeout(() => setSaveStatus(''), 2000);
     } catch (error) { 
       setSaveStatus('Gagal ✗'); 
-      console.error("Error Firebase:", error);
+      showToast("Data Gagal Disimpan! Terlalu besar.", "error");
     }
   };
 
   const updateDb = (key, value) => { saveToDatabase({ ...db, [key]: value }); };
 
-  const addLog = (action, detail, user = loggedInUser?.name || 'Sistem') => {
-    const newLog = { id: `LOG-${Date.now()}`, timestamp: new Date().toLocaleString(), user, action, detail };
-    updateDb('logs', [newLog, ...(db.logs || [])]);
+  const createLog = (dbState, action, detail, user = loggedInUser?.name || 'Sistem') => {
+    const newLog = { id: `LOG-${Date.now()}-${Math.floor(Math.random()*1000)}`, timestamp: new Date().toLocaleString(), user, action, detail };
+    return [newLog, ...(dbState.logs || [])];
   };
 
   const login = (username, password) => {
-    const userList = db.users || []; 
-    const user = userList.find(u => u.username === username && u.password === password);
+    const user = (db.users || []).find(u => u.username === username && u.password === password);
     if (user) { 
-       setLoggedInUser(user); setView('admin'); addLog('Otorisasi', 'Login Admin'); return true; 
+       setLoggedInUser(user); setView('admin'); 
+       saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Login Admin', user.name) });
+       return true; 
     }
-    // Backdoor Master Key
     if (username === 'dev' && password === 'dev') {
        const devUser = { id: 'U0', username: 'dev', password: 'dev', name: 'Developer System', role: 'developer' };
-       setLoggedInUser(devUser); setView('admin'); addLog('Otorisasi', 'Bypass Login Developer'); return true;
+       setLoggedInUser(devUser); setView('admin'); 
+       saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Bypass Login Developer', 'Developer') });
+       return true;
     }
     return false;
   };
-  const logout = () => { setLoggedInUser(null); setView('dashboard'); addLog('Otorisasi', 'Logout Admin'); };
+  
+  const logout = () => { 
+    saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Logout Admin', loggedInUser?.name) });
+    setLoggedInUser(null); setView('dashboard'); 
+  };
 
   const memberLogin = (username, password) => {
-    const memberList = db.members || [];
-    const member = memberList.find(m => m.username === username && m.password === password && m.status === 'approved');
+    const member = (db.members || []).find(m => m.username === username && m.password === password && m.status === 'approved');
     if (member) { setLoggedInMember(member); setView('member_profile'); showToast(`Selamat datang, ${member.name}!`); return true; }
     return false;
   };
   const memberLogout = () => { setLoggedInMember(null); setView('dashboard'); showToast('Berhasil keluar akun.'); };
 
-  const requireApproval = (actionType, payload, successMsg, isDestructive = false) => {
+  const requireApproval = (actionType, payload, successMsg) => {
     if (!loggedInUser) return false;
     if (['developer', 'owner'].includes(loggedInUser.role) || (loggedInUser.role === 'manager' && actionType !== 'UPDATE_USER')) { 
       executeAction(actionType, payload); showToast(successMsg); return true; 
     }
+    
     const newApp = { id: `APP-${Date.now()}`, actionType, payload, requestedBy: loggedInUser.name, requesterRole: loggedInUser.role, date: new Date().toLocaleString() };
-    updateDb('approvals', [newApp, ...(db.approvals || [])]);
-    showToast('Tindakan butuh persetujuan Manager/Owner', 'info'); addLog('Persetujuan', `Mengajukan: ${actionType}`);
+    saveToDatabase({
+      ...db,
+      approvals: [newApp, ...(db.approvals || [])],
+      logs: createLog(db, 'Persetujuan', `Mengajukan: ${actionType}`)
+    });
+    showToast('Tindakan butuh persetujuan Manager/Owner', 'info'); 
     return false;
   };
 
   const executeAction = (actionType, payload) => {
     let newDb = { ...db };
+    let actStr = ''; let detStr = '';
+
     switch (actionType) {
-      case 'ADD_PRODUCT': newDb.products = [payload, ...newDb.products]; addLog('Inventaris', `Tambah: ${payload.name}`); break;
-      case 'EDIT_PRODUCT': newDb.products = newDb.products.map(p => p.id === payload.id ? payload : p); addLog('Inventaris', `Edit: ${payload.id}`); break;
-      case 'DELETE_PRODUCT': newDb.products = newDb.products.filter(p => p.id !== payload.id); addLog('Inventaris', `Hapus: ${payload.id}`); break;
-      case 'UPDATE_PRODUCT_STATUS': newDb.products = newDb.products.map(p => p.id === payload.id ? { ...p, status: payload.status } : p); break;
-      case 'ADD_CATEGORY': newDb.categories = [...newDb.categories, payload]; break;
-      case 'DELETE_CATEGORY': newDb.categories = newDb.categories.filter(c => c !== payload); break;
-      case 'UPDATE_ORDER': newDb.orders = newDb.orders.map(o => o.id === payload.id ? { ...o, status: payload.status, denda: payload.denda, totalRefundDeposit: payload.refund } : o); addLog('Pesanan', `Status ${payload.id} -> ${payload.status}`); break;
+      case 'ADD_PRODUCT': newDb.products = [payload, ...(newDb.products||[])]; actStr='Inventaris'; detStr=`Tambah: ${payload.name}`; break;
+      case 'EDIT_PRODUCT': newDb.products = (newDb.products||[]).map(p => p.id === payload.id ? payload : p); actStr='Inventaris'; detStr=`Edit: ${payload.id}`; break;
+      case 'DELETE_PRODUCT': newDb.products = (newDb.products||[]).filter(p => p.id !== payload.id); actStr='Inventaris'; detStr=`Hapus: ${payload.id}`; break;
+      case 'UPDATE_PRODUCT_STATUS': newDb.products = (newDb.products||[]).map(p => p.id === payload.id ? { ...p, status: payload.status } : p); actStr='Inventaris'; detStr=`Status ${payload.id} -> ${payload.status}`; break;
+      case 'ADD_CATEGORY': newDb.categories = [...(newDb.categories||[]), payload]; actStr='Kategori'; detStr=`Tambah: ${payload}`; break;
+      case 'DELETE_CATEGORY': newDb.categories = (newDb.categories||[]).filter(c => c !== payload); actStr='Kategori'; detStr=`Hapus: ${payload}`; break;
+      case 'UPDATE_ORDER': newDb.orders = (newDb.orders||[]).map(o => o.id === payload.id ? { ...o, status: payload.status, denda: payload.denda||0, totalRefundDeposit: payload.refund||0 } : o); actStr='Pesanan'; detStr=`Status ${payload.id} -> ${payload.status}`; break;
+      
+      // BATCH UPDATE: Menyelesaikan/Membatalkan pesanan & mengubah semua baju ke Maintenance dalam SATU KALI SIMPAN
+      case 'COMPLETE_ORDER': 
+        newDb.orders = (newDb.orders||[]).map(o => o.id === payload.orderId ? { ...o, status: payload.newStatus, denda: payload.denda||0, totalRefundDeposit: payload.refund||0 } : o);
+        newDb.products = (newDb.products||[]).map(p => payload.itemIds.includes(p.id) ? { ...p, status: 'Maintenance' } : p);
+        actStr='Pesanan'; detStr=`Selesai & Baju ke Maintenance: ${payload.orderId}`; break;
+      case 'CANCEL_ORDER': 
+        newDb.orders = (newDb.orders||[]).map(o => o.id === payload.orderId ? { ...o, status: payload.newStatus } : o);
+        newDb.products = (newDb.products||[]).map(p => payload.itemIds.includes(p.id) ? { ...p, status: 'Maintenance' } : p);
+        actStr='Pesanan'; detStr=`Batal & Baju ke Maintenance: ${payload.orderId}`; break;
+
       case 'REGISTER_MEMBER':
-        const newId = `MEM-${new Date().getFullYear().toString().slice(-2)}${String(db.members.length + 1).padStart(3, '0')}`;
-        newDb.members = [{ ...payload, id: newId, points: 0, status: 'approved', wishlist: [] }, ...newDb.members];
-        addLog('Member', `Setuju member: ${newId}`); break;
+        const newId = `MEM-${new Date().getFullYear().toString().slice(-2)}${String((newDb.members||[]).length + 1).padStart(3, '0')}`;
+        newDb.members = [{ ...payload, id: newId, points: 0, status: 'approved', wishlist: [] }, ...(newDb.members||[])];
+        actStr='Member'; detStr=`Setuju member: ${newId}`; break;
       case 'UPDATE_USER': 
-        newDb.users = newDb.users.map(u => u.id === payload.userId ? { ...u, ...payload } : u);
-        if(loggedInUser?.id === payload.userId) setLoggedInUser(prev => ({...prev, ...payload})); break;
-      case 'ADD_PRIZE': newDb.prizes = [payload, ...newDb.prizes]; addLog('Hadiah', `Tambah: ${payload.name}`); break;
-      case 'DELETE_PRIZE': newDb.prizes = newDb.prizes.filter(p => p.id !== payload.id); addLog('Hadiah', `Hapus: ${payload.id}`); break;
+        newDb.users = (newDb.users||[]).map(u => u.id === payload.userId ? { ...u, ...payload } : u);
+        if(loggedInUser?.id === payload.userId) setLoggedInUser(prev => ({...prev, ...payload}));
+        actStr='Pengguna'; detStr=`Update Profil/Pass: ${payload.username}`; break;
+      case 'ADD_PRIZE': newDb.prizes = [payload, ...(newDb.prizes||[])]; actStr='Hadiah'; detStr=`Tambah: ${payload.name}`; break;
+      case 'DELETE_PRIZE': newDb.prizes = (newDb.prizes||[]).filter(p => p.id !== payload.id); actStr='Hadiah'; detStr=`Hapus: ${payload.id}`; break;
       default: break;
     }
+    
+    if(actStr) { newDb.logs = createLog(newDb, actStr, detStr); }
     saveToDatabase(newDb);
   };
 
   const handleApproval = (id, action) => {
-    const req = db.approvals.find(a => a.id === id); if (!req) return;
+    const req = (db.approvals||[]).find(a => a.id === id); if (!req) return;
     if (action === 'approve') { executeAction(req.actionType, req.payload); showToast('Disetujui'); } else { showToast('Ditolak', 'info'); }
-    updateDb('approvals', db.approvals.filter(a => a.id !== id));
+    saveToDatabase({ ...db, approvals: db.approvals.filter(a => a.id !== id), logs: createLog(db, 'Persetujuan', `${action === 'approve' ? 'Setuju' : 'Tolak'}: ${req.actionType}`) });
   };
 
   const getAvailableStock = (productId) => {
-    const product = db.products.find(p => p.id === productId); if (!product || product.status === 'Maintenance') return 0;
-    const rented = db.orders.filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status)).reduce((total, order) => {
+    const product = (db.products||[]).find(p => p.id === productId); if (!product || product.status === 'Maintenance') return 0;
+    const rented = (db.orders||[]).filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status)).reduce((total, order) => {
       const item = order.items.find(i => i.id === productId); return total + (item ? item.quantity : 0);
     }, 0);
     return product.totalStock - rented;
@@ -264,8 +278,8 @@ const AppStateProvider = ({ children }) => {
     
     const updatedMember = { ...loggedInMember, wishlist: newWishlist };
     setLoggedInMember(updatedMember);
-    const newMembers = db.members.map(m => m.id === updatedMember.id ? updatedMember : m);
-    updateDb('members', newMembers);
+    const newMembers = (db.members||[]).map(m => m.id === updatedMember.id ? updatedMember : m);
+    saveToDatabase({ ...db, members: newMembers });
     showToast(isWished ? 'Dihapus dari wishlist' : 'Tersimpan di wishlist!');
   };
 
@@ -277,29 +291,34 @@ const AppStateProvider = ({ children }) => {
     const totalBiaya = totalSewa + totalDeposit; 
     
     const earnedPoints = loggedInMember ? Math.floor(totalSewa / 10000) : 0;
-    const newOrderId = `ORD-${2000 + db.orders.length + 1}`;
+    const newOrderId = `ORD-${2000 + (db.orders ? db.orders.length : 0) + 1}`;
 
     const newOrder = {
       id: newOrderId, date: new Date().toISOString().split('T')[0],
       customer: { name: formData.name, phone: formData.phone, identity: formData.identity, ktpUrl: formData.ktpUrl },
-      items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, deposit: c.deposit||0, quantity: c.quantity, images: c.images })),
+      items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, deposit: c.deposit||0, quantity: c.quantity, images: c.images||[] })),
       duration, startDate: formData.startDate, endDate: formData.endDate,
       totalSewa, totalDeposit, total: totalBiaya, status: 'Menunggu Konfirmasi',
       memberId: loggedInMember?.id || null, earnedPoints, denda: 0
     };
     
-    let newDb = { ...db, orders: [newOrder, ...db.orders] };
+    let newDb = { 
+      ...db, 
+      orders: [newOrder, ...(db.orders || [])],
+      logs: createLog(db, 'Pelanggan', `Pesanan masuk: ${newOrder.id}`, 'Pelanggan')
+    };
     
     if (loggedInMember) {
       const um = { ...loggedInMember, points: loggedInMember.points + earnedPoints };
       setLoggedInMember(um);
-      newDb.members = newDb.members.map(m => m.id === um.id ? um : m);
+      newDb.members = (newDb.members || []).map(m => m.id === um.id ? um : m);
     }
 
-    saveToDatabase(newDb); setCart([]); setView('success'); addLog('Pelanggan', `Pesanan masuk: ${newOrder.id}`);
+    saveToDatabase(newDb); 
+    setCart([]); setView('success'); 
 
     if (isWA) {
-      const waNumber = db.brandConfig.socialMedia.find(s => s.type === 'WhatsApp' || s.type === 'WA')?.value || '';
+      const waNumber = db.brandConfig?.socialMedia?.find(s => s.type === 'WhatsApp' || s.type === 'WA')?.value || '';
       const text = `Halo Admin ${db.brandConfig.appName}, saya ingin menyewa pakaian.\n\n*ID Pesanan:* ${newOrderId}\n*Nama:* ${formData.name}\n*Tgl Sewa:* ${formData.startDate} (${duration} Hari)\n\n*Total Biaya (Inc. Deposit):* ${formatRupiah(totalBiaya)}\n\nMohon konfirmasinya. Terima kasih!`;
       window.open(`https://wa.me/${waNumber.replace(/\D/g,'')}?text=${encodeURIComponent(text)}`, '_blank');
     }
@@ -349,7 +368,7 @@ const AppStateProvider = ({ children }) => {
 
   const submitMemberRegistration = (formData) => {
     const newApp = { id: `APP-${Date.now()}`, actionType: 'REGISTER_MEMBER', payload: formData, requestedBy: formData.name, requesterRole: 'Calon Member', date: new Date().toLocaleString() };
-    updateDb('approvals', [newApp, ...(db.approvals || [])]);
+    saveToDatabase({ ...db, approvals: [newApp, ...(db.approvals || [])], logs: createLog(db, 'Persetujuan', `Daftar Member: ${formData.name}`, 'Calon Member') });
     showToast('Pendaftaran diajukan. Menunggu persetujuan Admin.', 'info');
   };
 
@@ -358,9 +377,8 @@ const AppStateProvider = ({ children }) => {
     if (loggedInMember.points >= prize.points) {
       const updatedMember = { ...loggedInMember, points: loggedInMember.points - prize.points };
       setLoggedInMember(updatedMember);
-      const newMembers = db.members.map(m => m.id === updatedMember.id ? updatedMember : m);
-      updateDb('members', newMembers);
-      addLog('Hadiah', `Tukar poin dengan: ${prize.name}`, updatedMember.name);
+      const newMembers = (db.members||[]).map(m => m.id === updatedMember.id ? updatedMember : m);
+      saveToDatabase({ ...db, members: newMembers, logs: createLog(db, 'Hadiah', `Tukar poin dengan: ${prize.name}`, updatedMember.name) });
       showToast(`Berhasil menukar poin dengan ${prize.name}!`, 'success');
     } else {
       showToast('Poin Anda tidak mencukupi.', 'error');
@@ -493,7 +511,7 @@ const CustomerLayout = ({ children }) => {
             <h4 className="text-white font-serif tracking-wide text-lg mb-6">Hubungi Kami</h4>
             <ul className="space-y-4 text-sm text-stone-400">
               <li className="flex items-center gap-3"><div className="w-8 h-8 rounded-full bg-stone-800 flex items-center justify-center text-stone-300"><FileText className="w-4 h-4"/></div> {db.brandConfig.companyEmail}</li>
-              {db.brandConfig.socialMedia.map((soc, idx) => (
+              {(db.brandConfig.socialMedia || []).map((soc, idx) => (
                 <li key={`ft-soc-${idx}`} className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-stone-800 flex items-center justify-center text-stone-300"><span className="font-bold text-xs uppercase">{soc.type.charAt(0)}</span></div>
                   <span className="font-medium text-stone-300">{soc.type}:</span> {soc.value}
@@ -526,16 +544,16 @@ const DashboardView = () => {
         </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center group hover:shadow-md transition-all">
-          <div className={`${cTheme.light} p-4 rounded-2xl mb-4 group-hover:scale-110 transition-transform`}><Package className="w-8 h-8"/></div>
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center">
+          <div className={`${cTheme.light} p-4 rounded-2xl mb-4`}><Package className="w-8 h-8"/></div>
           <h3 className="font-bold text-stone-800 text-lg mb-2">Kualitas Premium</h3><p className="text-sm text-stone-500">Terawat dan higienis.</p>
         </div>
-        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center group hover:shadow-md transition-all">
-          <div className={`${cTheme.light} p-4 rounded-2xl mb-4 group-hover:scale-110 transition-transform`}><Shield className="w-8 h-8"/></div>
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center">
+          <div className={`${cTheme.light} p-4 rounded-2xl mb-4`}><Shield className="w-8 h-8"/></div>
           <h3 className="font-bold text-stone-800 text-lg mb-2">Aman & Terpercaya</h3><p className="text-sm text-stone-500">Sistem deposit transparan.</p>
         </div>
-        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center group hover:shadow-md transition-all">
-          <div className={`${cTheme.light} p-4 rounded-2xl mb-4 group-hover:scale-110 transition-transform`}><Award className="w-8 h-8"/></div>
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center">
+          <div className={`${cTheme.light} p-4 rounded-2xl mb-4`}><Award className="w-8 h-8"/></div>
           <h3 className="font-bold text-stone-800 text-lg mb-2">Poin Reward Member</h3><p className="text-sm text-stone-500">Sewa dan kumpulkan poin hadiah.</p>
         </div>
       </div>
@@ -548,7 +566,7 @@ const CatalogView = () => {
   const [activeCategory, setActiveCategory] = useState('Semua');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const filteredProducts = db.products.filter(p => 
+  const filteredProducts = (db.products||[]).filter(p => 
     p.status !== 'Maintenance' && 
     (activeCategory === 'Semua' || p.category === activeCategory) &&
     (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -562,7 +580,7 @@ const CatalogView = () => {
       </div>
       <div className="flex overflow-x-auto pb-4 mb-6 gap-3 no-scrollbar">
         <button onClick={() => setActiveCategory('Semua')} className={`px-6 py-2.5 rounded-full font-bold transition-all whitespace-nowrap ${activeCategory === 'Semua' ? 'bg-stone-900 text-white shadow-md' : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-50'}`}>Semua Koleksi</button>
-        {db.categories.map(cat => (
+        {(db.categories||[]).map(cat => (
           <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-6 py-2.5 rounded-full font-bold transition-all whitespace-nowrap ${activeCategory === cat ? `${cTheme.bg} text-white shadow-md` : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-50'}`}>{cat}</button>
         ))}
       </div>
@@ -672,7 +690,7 @@ const CartView = () => {
 };
 
 const CheckoutView = () => {
-  const { cart, processOrder, setView, cTheme, loggedInMember, compressImage, uploadImageToServer, showToast } = useContext(AppStateContext);
+  const { cart, processOrder, setView, cTheme, loggedInMember, showToast, compressImage, uploadImageToServer } = useContext(AppStateContext);
   const [formData, setFormData] = useState({ name: loggedInMember?.name||'', identity: loggedInMember?.identity||'', phone: loggedInMember?.phone||'', address: loggedInMember?.address||'', startDate: '', endDate: '', ktpUrl: loggedInMember?.ktpUrl||null });
   const [isUploading, setIsUploading] = useState(false);
 
@@ -697,10 +715,18 @@ const CheckoutView = () => {
     setIsUploading(false);
   };
   
-  const handleSubmit = (e, isWA = false) => { 
+  const handleWASubmit = () => {
+    if(!formData.name || !formData.phone || !formData.identity || !formData.address || !formData.startDate || !formData.endDate) {
+      showToast("Harap isi semua formulir yang wajib (*)", "error"); return;
+    }
+    if(new Date(formData.endDate) < new Date(formData.startDate)) { showToast("Tanggal akhir tidak valid!", "error"); return; }
+    processOrder({...formData, duration}, true); 
+  };
+
+  const handleSubmit = (e) => { 
     e.preventDefault(); 
-    if(new Date(formData.endDate) < new Date(formData.startDate)) return showToast("Tanggal akhir tidak valid!", "error"); 
-    processOrder({...formData, duration}, isWA); 
+    if(new Date(formData.endDate) < new Date(formData.startDate)) { showToast("Tanggal akhir tidak valid!", "error"); return; }
+    processOrder({...formData, duration}, false); 
   };
 
   return (
@@ -711,23 +737,23 @@ const CheckoutView = () => {
       </div>
 
       <div className="flex flex-col lg:flex-row gap-8">
-        <form id="co-form" onSubmit={(e)=>handleSubmit(e, false)} className="flex-grow bg-white p-8 rounded-3xl shadow-sm border border-stone-200 space-y-8">
+        <form id="co-form" onSubmit={handleSubmit} className="flex-grow bg-white p-8 rounded-3xl shadow-sm border border-stone-200 space-y-8">
           <section>
             <h2 className="font-bold text-xl text-stone-800 mb-6 border-b border-stone-100 pb-3 flex items-center gap-2"><User className="w-6 h-6 text-stone-400"/> Data Penyewa (Sesuai KTP)</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div><label className="block text-sm font-bold text-stone-700 mb-2">Nama Lengkap</label><input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px] transition-colors" /></div>
-              <div><label className="block text-sm font-bold text-stone-700 mb-2">NIK KTP</label><input required type="number" value={formData.identity} onChange={e => setFormData({...formData, identity: e.target.value})} className="w-full px-5 py-3.5 bg-stone-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px] transition-colors" /></div>
-              <div><label className="block text-sm font-bold text-stone-700 mb-2">WhatsApp</label><input required type="tel" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px] transition-colors" /></div>
-              <div><label className="block text-sm font-bold text-stone-700 mb-2">Upload KTP</label><label className="flex items-center gap-3 bg-stone-50 border border-stone-200 px-5 py-3.5 rounded-xl cursor-pointer hover:bg-stone-100 text-sm font-bold text-stone-600"><Upload className="w-5 h-5" /> <span className="truncate">{isUploading ? 'Uploading...' : formData.ktpUrl ? 'KTP OK' : 'Upload File'}</span><input required={!formData.ktpUrl} type="file" accept="image/*" onChange={handleKtpUpload} className="hidden" /></label></div>
-              <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Alamat Domisili</label><textarea required rows="2" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px]"></textarea></div>
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">Nama Lengkap *</label><input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px] transition-colors" /></div>
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">NIK KTP *</label><input required type="number" value={formData.identity} onChange={e => setFormData({...formData, identity: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px] transition-colors" /></div>
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">WhatsApp *</label><input required type="tel" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px] transition-colors" /></div>
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">Upload KTP *</label><label className="flex items-center gap-3 bg-stone-50 border border-stone-200 px-5 py-3.5 rounded-xl cursor-pointer hover:bg-stone-100 text-sm font-bold text-stone-600"><Upload className="w-5 h-5" /> <span className="truncate">{isUploading ? 'Uploading...' : formData.ktpUrl ? 'KTP OK' : 'Upload File'}</span><input required={!formData.ktpUrl} type="file" accept="image/*" onChange={handleKtpUpload} className="hidden" /></label></div>
+              <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Alamat Domisili *</label><textarea required rows="2" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px]"></textarea></div>
             </div>
           </section>
 
           <section>
             <h2 className="font-bold text-xl text-stone-800 mb-6 border-b border-stone-100 pb-3 flex items-center gap-2"><CalendarIcon className="w-6 h-6 text-stone-400"/> Rencana Sewa</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div><label className="block text-sm font-bold text-stone-700 mb-2">Tgl Mulai (Ambil)</label><input required type="date" min={new Date().toISOString().split('T')[0]} value={formData.startDate} onChange={e => setFormData({...formData, startDate: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px]" /></div>
-              <div><label className="block text-sm font-bold text-stone-700 mb-2">Tgl Akhir (Kembali)</label><input required type="date" min={formData.startDate || new Date().toISOString().split('T')[0]} value={formData.endDate} onChange={e => setFormData({...formData, endDate: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px]" /></div>
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">Tgl Mulai (Ambil) *</label><input required type="date" min={new Date().toISOString().split('T')[0]} value={formData.startDate} onChange={e => setFormData({...formData, startDate: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px]" /></div>
+              <div><label className="block text-sm font-bold text-stone-700 mb-2">Tgl Akhir (Kembali) *</label><input required type="date" min={formData.startDate || new Date().toISOString().split('T')[0]} value={formData.endDate} onChange={e => setFormData({...formData, endDate: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-rose-500 text-[16px]" /></div>
             </div>
           </section>
         </form>
@@ -745,7 +771,7 @@ const CheckoutView = () => {
             </div>
 
             {loggedInMember ? (
-              <button type="button" onClick={(e)=>handleSubmit(e, true)} className="w-full bg-green-500 text-white py-4 rounded-xl font-bold text-lg hover:bg-green-600 shadow-lg active:scale-95 flex justify-center items-center gap-2 mb-3"><MessageCircle className="w-6 h-6"/> Pesan via WhatsApp</button>
+              <button type="button" onClick={handleWASubmit} className="w-full bg-green-500 text-white py-4 rounded-xl font-bold text-lg hover:bg-green-600 shadow-lg active:scale-95 flex justify-center items-center gap-2 mb-3"><MessageCircle className="w-6 h-6"/> Pesan via WhatsApp</button>
             ) : (
               <button form="co-form" type="submit" className={`w-full ${cTheme.bg} text-white py-4 rounded-xl font-bold text-lg hover:brightness-110 shadow-lg active:scale-95 mb-3`}>Kirim Pesanan</button>
             )}
@@ -787,17 +813,13 @@ const MemberAuthView = () => {
     if (file) {
       setIsUploading(prev => ({ ...prev, [type]: true }));
       showToast(`Mengunggah gambar...`, 'info');
-      
       try {
         const compressed = await compressImage(file);
         const serverUrl = await uploadImageToServer(compressed);
         setFormData(prev => ({ ...prev, [type]: serverUrl }));
         showToast(`Gambar OK`, 'success');
-      } catch (error) {
-        showToast(`Gagal mengunggah gambar`, 'error');
-      } finally {
-        setIsUploading(prev => ({ ...prev, [type]: false }));
-      }
+      } catch (error) { showToast(`Gagal mengunggah gambar`, 'error'); } 
+      finally { setIsUploading(prev => ({ ...prev, [type]: false })); }
     }
   };
 
@@ -841,8 +863,8 @@ const MemberProfileView = () => {
   const { db, loggedInMember, memberLogout, cTheme, redeemPrize, addToCart } = useContext(AppStateContext);
   const [tab, setTab] = useState('wishlist');
   if (!loggedInMember) return null;
-  const myOrders = db.orders.filter(o => o.memberId === loggedInMember.id);
-  const myWishlist = db.products.filter(p => loggedInMember.wishlist?.includes(p.id));
+  const myOrders = (db.orders||[]).filter(o => o.memberId === loggedInMember.id);
+  const myWishlist = (db.products||[]).filter(p => (loggedInMember.wishlist||[]).includes(p.id));
 
   return (
     <div className="max-w-6xl mx-auto animate-fade-in-down flex flex-col lg:flex-row gap-8">
@@ -908,7 +930,7 @@ const MemberProfileView = () => {
 
           {tab === 'rewards' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {db.prizes.map(p => {
+              {(db.prizes||[]).map(p => {
                 const canRedeem = loggedInMember.points >= p.points;
                 return (
                   <div key={p.id} className="border border-stone-200 rounded-2xl overflow-hidden bg-white shadow-sm flex flex-col">
@@ -1015,7 +1037,6 @@ const AdminLayout = () => {
              <h1 className="text-xl md:text-2xl font-bold font-serif text-stone-800 capitalize truncate">{activeTab.replace('-', ' ')}</h1>
            </div>
            <div className="flex items-center gap-4">
-             {/* Indikator Realtime Sync */}
              <div className="hidden sm:flex items-center space-x-2 bg-stone-100 py-1.5 px-4 rounded-full border border-stone-200">
                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                <span className="text-xs font-bold text-stone-600 uppercase tracking-widest">Real-time Aktif</span>
@@ -1033,7 +1054,7 @@ const AdminLayout = () => {
           {activeTab === 'prizes' && <AdminPrizes />}
           {activeTab === 'approvals' && <AdminApprovals />}
           {activeTab === 'account' && <AdminAccountSettings />}
-          {activeTab === 'settings' && <AdminSystemSettings />}
+          {activeTab === 'settings' && (loggedInUser.role === 'owner' || loggedInUser.role === 'developer') && <AdminSystemSettings />}
           {activeTab === 'logs' && <AdminLogs />}
           {activeTab === 'developer' && <AdminDeveloperPanel />}
         </div>
@@ -1044,8 +1065,8 @@ const AdminLayout = () => {
 
 const AdminStats = () => {
   const { db } = useContext(AppStateContext);
-  const completed = db.orders.filter(o => o.status === 'Selesai');
-  const active = db.orders.filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status));
+  const completed = (db.orders||[]).filter(o => o.status === 'Selesai');
+  const active = (db.orders||[]).filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status));
   const revenue = completed.reduce((s, o) => s + (o.total - (o.totalDeposit||0) + (o.denda||0)), 0);
 
   return (
@@ -1053,7 +1074,7 @@ const AdminStats = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"><div className="w-12 h-12 bg-green-50 text-green-600 rounded-2xl flex items-center justify-center mb-4"><BarChart3 className="w-6 h-6"/></div><div className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-1">Pendapatan Selesai</div><div className="text-2xl font-bold text-stone-800 truncate">{formatRupiah(revenue)}</div></div>
         <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"><div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4"><Package className="w-6 h-6"/></div><div className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-1">Pesanan Aktif</div><div className="text-2xl font-bold text-stone-800">{active.length}</div></div>
-        <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"><div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mb-4"><Users className="w-6 h-6"/></div><div className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-1">Total Member</div><div className="text-2xl font-bold text-stone-800">{db.members.filter(m=>m.status === 'approved').length}</div></div>
+        <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"><div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mb-4"><Users className="w-6 h-6"/></div><div className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-1">Total Member</div><div className="text-2xl font-bold text-stone-800">{(db.members||[]).filter(m=>m.status === 'approved').length}</div></div>
       </div>
     </div>
   );
@@ -1065,7 +1086,7 @@ const AdminOrderManager = () => {
   const [expandedId, setExpandedId] = useState(null);
   const [dendaModal, setDendaModal] = useState({ isOpen: false, order: null, amount: 0, newStatus: '' });
 
-  const displayedOrders = tab === 'aktif' ? db.orders.filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status)) : db.orders.filter(o => ['Selesai', 'Dibatalkan'].includes(o.status));
+  const displayedOrders = tab === 'aktif' ? (db.orders||[]).filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status)) : (db.orders||[]).filter(o => ['Selesai', 'Dibatalkan'].includes(o.status));
   
   const handleStatusChange = (order, newStatus) => {
     if (order.status === newStatus) return;
@@ -1075,11 +1096,12 @@ const AdminOrderManager = () => {
       return;
     }
     
-    requireApproval('UPDATE_ORDER', { id: order.id, status: newStatus, denda: 0, refund: order.totalDeposit || 0 }, `Status pesanan ${order.id} diubah ke ${newStatus}.`);
-    
     if (newStatus === 'Dibatalkan') {
-       order.items.forEach(item => requireApproval('UPDATE_PRODUCT_STATUS', { id: item.id, status: 'Maintenance' }, '', true));
+       requireApproval('CANCEL_ORDER', { orderId: order.id, newStatus: newStatus, itemIds: order.items.map(i => i.id) }, `Pesanan Dibatalkan & barang masuk Maintenance.`);
+       return;
     }
+    
+    requireApproval('UPDATE_ORDER', { id: order.id, status: newStatus, denda: 0, refund: order.totalDeposit || 0 }, `Status pesanan ${order.id} diubah ke ${newStatus}.`);
   };
 
   const confirmSelesai = () => {
@@ -1087,8 +1109,7 @@ const AdminOrderManager = () => {
     let refund = (dendaModal.order.totalDeposit || 0) - denda;
     if (refund < 0) refund = 0;
     
-    requireApproval('UPDATE_ORDER', { id: dendaModal.order.id, status: dendaModal.newStatus, denda, refund }, `Status pesanan diubah ke ${dendaModal.newStatus}.`);
-    dendaModal.order.items.forEach(item => requireApproval('UPDATE_PRODUCT_STATUS', { id: item.id, status: 'Maintenance' }, '', true));
+    requireApproval('COMPLETE_ORDER', { orderId: dendaModal.order.id, newStatus: dendaModal.newStatus, denda, refund, itemIds: dendaModal.order.items.map(i => i.id) }, `Pesanan Selesai & barang masuk Maintenance.`);
     setDendaModal({ isOpen: false, order: null, amount: 0, newStatus: '' });
   };
 
@@ -1217,14 +1238,11 @@ const AdminInventory = () => {
     if (!files.length) return; 
     
     showToast('Mengkompresi & Mengunggah gambar...', 'info');
-    
     try {
-      // Parallel upload to make it blazing fast
       const uploadPromises = files.map(async (f) => {
         const compressed = await compressImage(f);
         return await uploadImageToServer(compressed);
       });
-      
       const compressedUrls = await Promise.all(uploadPromises);
       
       if (isEdit) {
@@ -1246,14 +1264,14 @@ const AdminInventory = () => {
     }
   };
 
-  const generateId = (cat) => { const prefix = cat ? cat.substring(0,2).toUpperCase() : 'XX'; const count = db.products.filter(p => p.id.startsWith(prefix)).length + 1; return `${prefix}-${1000 + count}`; };
+  const generateId = (cat) => { const prefix = cat ? cat.substring(0,2).toUpperCase() : 'XX'; const count = (db.products||[]).filter(p => p.id.startsWith(prefix)).length + 1; return `${prefix}-${1000 + count}`; };
   
   const handleAddProduct = (e) => { e.preventDefault(); requireApproval('ADD_PRODUCT', { id: generateId(formData.category), ...formData, price: parseInt(formData.price), deposit: parseInt(formData.deposit||0), totalStock: parseInt(formData.totalStock), status: 'Tersedia' }, 'Produk disimpan.'); setShowAddForm(false); setFormData({ name: '', price: '', deposit:'', category: db.categories[0] || '', desc: '', images: [], totalStock: 1, productLink: '' }); };
-  const handleAddCategory = (e) => { e.preventDefault(); if (newCategoryName.trim() && !db.categories.includes(newCategoryName.trim())) { requireApproval('ADD_CATEGORY', newCategoryName.trim(), 'Kategori dibuat.'); setNewCategoryName(''); } };
+  const handleAddCategory = (e) => { e.preventDefault(); if (newCategoryName.trim() && !(db.categories||[]).includes(newCategoryName.trim())) { requireApproval('ADD_CATEGORY', newCategoryName.trim(), 'Kategori dibuat.'); setNewCategoryName(''); } };
   const handleSaveEdit = (p) => { if(editData.price && editData.totalStock) { requireApproval('EDIT_PRODUCT', {...p, price: parseInt(editData.price), deposit: parseInt(editData.deposit||0), totalStock: parseInt(editData.totalStock), productLink: editData.productLink, images: editData.images}, 'Perubahan disimpan.'); setEditingId(null); } };
 
-  const filteredProducts = db.products.filter(p => p.status !== 'Maintenance' && (activeCategory === 'Semua' || p.category === activeCategory) && (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase())));
-  const maintenanceProducts = db.products.filter(p => p.status === 'Maintenance');
+  const filteredProducts = (db.products||[]).filter(p => p.status !== 'Maintenance' && (activeCategory === 'Semua' || p.category === activeCategory) && (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase())));
+  const maintenanceProducts = (db.products||[]).filter(p => p.status === 'Maintenance');
 
   return (
     <div className="animate-fade-in-down w-full">
@@ -1270,7 +1288,7 @@ const AdminInventory = () => {
              <h3 className="font-bold text-stone-800 mb-5 flex items-center gap-2"><SettingsIcon className="w-5 h-5 text-stone-400"/> Pengaturan Kategori</h3>
              <div className="flex flex-wrap items-center gap-3 mb-6">
                 <button onClick={() => setActiveCategory('Semua')} className={`px-5 py-2.5 rounded-full text-sm font-bold transition-all ${activeCategory === 'Semua' ? 'bg-stone-900 text-white shadow-md' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}>Semua Filter</button>
-                {db.categories.map(cat => (
+                {(db.categories||[]).map(cat => (
                    <div key={`cat-${cat}`} className={`flex items-center rounded-full border transition-all ${activeCategory === cat ? `${cTheme.bg} text-white border-transparent shadow-md` : 'bg-white border-stone-200 text-stone-700 shadow-sm'}`}>
                      <button onClick={() => setActiveCategory(cat)} className="px-5 py-2.5 text-sm font-medium">{cat}</button>
                      <div className="w-px h-5 bg-stone-300"></div>
@@ -1289,7 +1307,7 @@ const AdminInventory = () => {
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
                 <input type="text" placeholder="Cari ID atau nama baju..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="w-full pl-12 pr-4 py-3.5 bg-white border border-stone-200 rounded-xl text-[16px] focus:outline-none focus:border-stone-400 shadow-sm" />
              </div>
-             <button onClick={() => setShowAddForm(!showAddForm)} disabled={db.categories.length === 0} className={`text-white px-6 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:brightness-110 shadow-lg active:scale-95 ${db.categories.length === 0 ? 'bg-stone-300 cursor-not-allowed' : cTheme.bg}`}><Plus className="w-5 h-5"/> {showAddForm ? 'Tutup Formulir' : 'Tambah Produk'}</button>
+             <button onClick={() => setShowAddForm(!showAddForm)} disabled={(db.categories||[]).length === 0} className={`text-white px-6 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:brightness-110 shadow-lg active:scale-95 ${(db.categories||[]).length === 0 ? 'bg-stone-300 cursor-not-allowed' : cTheme.bg}`}><Plus className="w-5 h-5"/> {showAddForm ? 'Tutup Formulir' : 'Tambah Produk'}</button>
           </div>
 
           {showAddForm && (
@@ -1301,7 +1319,7 @@ const AdminInventory = () => {
                      <div><label className="block text-sm font-bold text-stone-700 mb-2">Harga Sewa / Hari</label><input required type="number" value={formData.price} onChange={e=>setFormData({...formData, price: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400" /></div>
                      <div><label className="block text-sm font-bold text-amber-700 mb-2">Deposit (Jaminan)</label><input type="number" value={formData.deposit} onChange={e=>setFormData({...formData, deposit: e.target.value})} className="w-full px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-[16px] outline-none focus:border-amber-400" /></div>
                   </div>
-                  <div><label className="block text-sm font-bold text-stone-700 mb-2">Pilih Kategori</label><select required value={formData.category} onChange={e=>setFormData({...formData, category: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400 cursor-pointer">{db.categories.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+                  <div><label className="block text-sm font-bold text-stone-700 mb-2">Pilih Kategori</label><select required value={formData.category} onChange={e=>setFormData({...formData, category: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400 cursor-pointer">{(db.categories||[]).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
                   <div><label className="block text-sm font-bold text-stone-700 mb-2">Jumlah Fisik Barang</label><input required type="number" min="1" value={formData.totalStock} onChange={e=>setFormData({...formData, totalStock: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400" /></div>
                   
                   <div className="sm:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Link Referensi/Eksternal (Opsional)</label><input type="url" placeholder="https://" value={formData.productLink} onChange={e=>setFormData({...formData, productLink: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400" /></div>
@@ -1425,7 +1443,7 @@ const AdminCalendar = () => {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [selectedDate, setSelectedDate] = useState(null);
 
-  const filteredOrders = db.orders.filter(order => {
+  const filteredOrders = (db.orders||[]).filter(order => {
     if (!search) return true;
     const s = search.toLowerCase();
     return order.items.some(item => item.name.toLowerCase().includes(s) || item.id.toLowerCase().includes(s));
@@ -1522,13 +1540,13 @@ const AdminCalendar = () => {
 const AdminCustomers = () => {
   const { db, handleApproval, loggedInUser, cTheme } = useContext(AppStateContext);
   const [tab, setTab] = useState('member');
-  const approvedMembers = db.members.filter(m => m.status === 'approved');
-  const nonMembers = db.orders.filter(o => !o.memberId).reduce((acc, order) => {
+  const approvedMembers = (db.members||[]).filter(m => m.status === 'approved');
+  const nonMembers = (db.orders||[]).filter(o => !o.memberId).reduce((acc, order) => {
      const existing = acc.find(c => c.identity === order.customer.identity);
      if (existing) { existing.totalSpent += order.total; existing.orderCount += 1; } else { acc.push({ ...order.customer, totalSpent: order.total, orderCount: 1 }); }
      return acc;
   }, []);
-  const memberApps = db.approvals.filter(a => a.actionType === 'REGISTER_MEMBER');
+  const memberApps = (db.approvals||[]).filter(a => a.actionType === 'REGISTER_MEMBER');
 
   return (
     <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden animate-fade-in-down w-full">
@@ -1623,12 +1641,12 @@ const AdminPrizes = () => {
             <div><label className="block text-sm font-bold text-stone-700 mb-2">Nama Hadiah</label><input required type="text" value={formData.name} onChange={e=>setFormData({...formData, name: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
             <div><label className="block text-sm font-bold text-stone-700 mb-2">Harga (Poin)</label><input required type="number" min="1" value={formData.points} onChange={e=>setFormData({...formData, points: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
             <div className="sm:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Deskripsi Singkat</label><textarea required rows="2" value={formData.desc} onChange={e=>setFormData({...formData, desc: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none"></textarea></div>
-            <div className="sm:col-span-2"><label className="flex items-center justify-center p-5 border-2 border-dashed border-stone-300 rounded-2xl cursor-pointer hover:bg-stone-50 text-sm font-bold text-stone-500 bg-white"><Upload className="w-5 h-5 mr-3" /> {isUploading ? 'Uploading...' : formData.image ? 'Gambar Siap' : 'Upload Foto Hadiah'}<input required={!formData.image} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" /></label></div>
+            <div className="sm:col-span-2"><label className="flex items-center justify-center p-5 border-2 border-dashed border-stone-300 rounded-2xl cursor-pointer hover:bg-stone-50 text-sm font-bold text-stone-500 bg-white"><Upload className="w-5 h-5 mr-3" /> {isUploading ? 'Uploading...' : formData.image ? 'Gambar Siap' : 'Upload Foto Hadiah'}<input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" /></label></div>
             <button type="submit" className={`sm:col-span-2 py-4 ${cTheme.bg} text-white font-bold text-lg rounded-xl mt-4 shadow-lg active:scale-95`}>Masukkan ke Katalog</button>
          </form>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {db.prizes.map(p => (
+        {(db.prizes||[]).map(p => (
            <div key={p.id} className="bg-white border border-stone-200 rounded-3xl shadow-sm overflow-hidden flex flex-col hover:shadow-lg">
               <div className="h-40 bg-stone-100 relative">
                  <img src={p.image} className="w-full h-full object-cover" alt="prize"/>
@@ -1648,7 +1666,7 @@ const AdminPrizes = () => {
 
 const AdminApprovals = () => {
   const { db, handleApproval, loggedInUser } = useContext(AppStateContext);
-  const sysApps = db.approvals.filter(a => a.actionType !== 'REGISTER_MEMBER');
+  const sysApps = (db.approvals||[]).filter(a => a.actionType !== 'REGISTER_MEMBER');
   if (sysApps.length === 0) return <div className="text-center py-20 text-stone-500 bg-white rounded-3xl border border-dashed border-stone-300 animate-fade-in-down"><CheckCircle className="w-16 h-16 mx-auto mb-4 text-stone-300"/>Aman, tidak ada antrean.</div>;
 
   return (
@@ -1688,7 +1706,7 @@ const AdminAccountSettings = () => {
       <form onSubmit={handleSubmit} className="space-y-5">
         <div><label className="block text-sm font-bold text-stone-700 mb-2">Nama Tampilan</label><input required type="text" value={formData.name} onChange={e=>setFormData({...formData, name: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-rose-600" /></div>
         <div><label className="block text-sm font-bold text-stone-700 mb-2">Username Login</label><input required type="text" value={formData.username} onChange={e=>setFormData({...formData, username: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-rose-600" /></div>
-        <div><label className="block text-sm font-bold text-stone-700 mb-2">Password Akses</label><input required type="text" value={formData.password} onChange={e=>setFormData({...formData, password: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-rose-600" /></div>
+        <div><label className="block text-sm font-bold text-stone-700 mb-2">Password Akses</label><input required type="password" value={formData.password} onChange={e=>setFormData({...formData, password: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-rose-600" /></div>
         <button type="submit" className="w-full py-4 bg-stone-900 text-white rounded-xl font-bold hover:bg-black mt-6 shadow-xl active:scale-95 text-lg">Ajukan Pergantian Data</button>
       </form>
     </div>
@@ -1700,7 +1718,6 @@ const AdminSystemSettings = () => {
   const [bConfig, setBConfig] = useState(db.brandConfig);
   const [isUploading, setIsUploading] = useState(false);
 
-  // Sync state dynamically if DB updates from another device
   useEffect(() => { setBConfig(db.brandConfig); }, [db.brandConfig]);
 
   const handleSaveBrand = (e) => { e.preventDefault(); updateDb('brandConfig', bConfig); showToast('Konfigurasi Toko Disimpan.', 'success'); };
@@ -1719,7 +1736,7 @@ const AdminSystemSettings = () => {
   };
 
   const handlePasswordReset = (userId, newPassword) => {
-    const newUsers = db.users.map(u => u.id === userId ? { ...u, password: newPassword } : u);
+    const newUsers = (db.users||[]).map(u => u.id === userId ? { ...u, password: newPassword } : u);
     updateDb('users', newUsers);
     showToast(`Password staf berhasil diubah!`, 'success');
   };
@@ -1748,9 +1765,9 @@ const AdminSystemSettings = () => {
             <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Email Bisnis</label><input type="email" value={bConfig.companyEmail} onChange={e=>setBConfig({...bConfig, companyEmail: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
             
             <div className="md:col-span-2 bg-stone-50 p-6 rounded-2xl border border-stone-200 mt-4">
-              <div className="flex justify-between items-center mb-6"><label className="block text-base font-serif font-bold text-stone-800">Jejaring Sosial Dinamis</label><button type="button" onClick={()=>setBConfig({...bConfig, socialMedia: [...bConfig.socialMedia, {type: 'Instagram', value: '', label: ''}]})} className="text-xs bg-stone-900 text-white px-4 py-2.5 rounded-lg font-bold shadow-md hover:bg-black">+ Akun Baru</button></div>
+              <div className="flex justify-between items-center mb-6"><label className="block text-base font-serif font-bold text-stone-800">Jejaring Sosial Dinamis</label><button type="button" onClick={()=>setBConfig({...bConfig, socialMedia: [...(bConfig.socialMedia||[]), {type: 'Instagram', value: '', label: ''}]})} className="text-xs bg-stone-900 text-white px-4 py-2.5 rounded-lg font-bold shadow-md hover:bg-black">+ Akun Baru</button></div>
               <div className="space-y-4">
-                {bConfig.socialMedia.map((soc, i) => (
+                {(bConfig.socialMedia||[]).map((soc, i) => (
                   <div key={i} className="flex flex-col sm:flex-row gap-3 items-start sm:items-center bg-white p-3 rounded-xl border border-stone-100 shadow-sm">
                     <select value={soc.type} onChange={e=>updateSocial(i, 'type', e.target.value)} className="w-full sm:w-40 px-4 py-3 bg-stone-50 border border-stone-200 rounded-lg text-sm font-bold outline-none"><option>WhatsApp</option><option>WA</option><option>Instagram</option><option>TikTok</option></select>
                     <input type="text" placeholder="Username / No HP / Link URL" value={soc.value} onChange={e=>updateSocial(i, 'value', e.target.value)} className="w-full flex-1 px-4 py-3 bg-stone-50 border border-stone-200 rounded-lg outline-none" />
@@ -1766,10 +1783,10 @@ const AdminSystemSettings = () => {
       <div className="bg-white p-6 md:p-10 rounded-3xl border border-stone-200 shadow-sm w-full overflow-hidden">
          <h2 className="text-xl md:text-2xl font-serif font-bold mb-8 flex items-center gap-3 border-b border-stone-100 pb-5 text-stone-800"><Users className="w-7 h-7 text-rose-600"/> Kendali Staf (HR)</h2>
          <div className="w-full overflow-x-auto">
-           <table className="w-full text-left min-w-[700px] border-collapse">
+           <table className="w-full text-left min-w-[600px] border-collapse">
              <thead><tr className="text-xs font-bold text-stone-400 uppercase tracking-wider border-b border-stone-200 bg-stone-50"><th className="p-4 rounded-tl-xl">Identitas Staf</th><th className="p-4">Username Login</th><th className="p-4">Ubah Password</th><th className="p-4 text-right rounded-tr-xl">Pangkat Akses (Role)</th></tr></thead>
              <tbody className="divide-y divide-stone-100">
-               {db.users.filter(u => u.role !== 'developer').map(u => (
+               {(db.users||[]).filter(u => u.role !== 'developer').map(u => (
                  <tr key={u.id} className="hover:bg-stone-50/50 transition-colors">
                    <td className="p-4 font-bold text-stone-800 text-base">{u.name} {u.id === loggedInUser?.id && <span className="text-[10px] bg-stone-800 text-white px-2.5 py-1 rounded-md ml-3 uppercase tracking-widest shadow-sm">Anda</span>}</td>
                    <td className="p-4 text-sm font-mono text-stone-500">{u.username}</td>
@@ -1803,7 +1820,7 @@ const AdminLogs = () => {
          <table className="w-full text-left border-collapse min-w-[800px]">
             <thead><tr className="bg-white text-stone-400 font-bold border-b border-stone-200 text-xs uppercase tracking-wider"><th className="p-5">Waktu Kejadian</th><th className="p-5">Aktor (User)</th><th className="p-5">Kategori</th><th className="p-5">Detail Perubahan</th></tr></thead>
             <tbody className="divide-y divide-stone-100">
-               {db.logs?.length === 0 ? <tr><td colSpan="4" className="text-center py-16 text-stone-500 font-medium bg-stone-50">Belum ada riwayat aktivitas tercatat.</td></tr> :
+               {!(db.logs?.length) ? <tr><td colSpan="4" className="text-center py-16 text-stone-500 font-medium bg-stone-50">Belum ada riwayat aktivitas tercatat.</td></tr> :
                 db.logs?.map(log => (
                    <tr key={log.id} className="hover:bg-stone-50/80 transition-colors">
                       <td className="p-5 text-xs font-mono text-stone-500">{log.timestamp}</td>
@@ -1821,18 +1838,20 @@ const AdminLogs = () => {
 };
 
 const AdminDeveloperPanel = () => {
-  const { db, updateDb, exportData, importData, showToast } = useContext(AppStateContext);
+  const { db, updateDb, saveToDatabase, exportData, importData, showToast } = useContext(AppStateContext);
   const handleFileUpload = (e) => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (event) => { importData(event.target.result); e.target.value = null; }; reader.readAsText(file); };
   
   const handleRoleChange = (userId, newRole) => { 
-    const newUsers = db.users.map(u => u.id === userId ? { ...u, role: newRole } : u); 
-    updateDb('users', newUsers); 
-    showToast(`Otoritas di-override oleh Developer.`, 'success'); 
+    const newUsers = (db.users||[]).map(u => u.id === userId ? { ...u, role: newRole } : u);
+    const newLog = { id: `LOG-${Date.now()}-${Math.floor(Math.random()*1000)}`, timestamp: new Date().toLocaleString(), user: 'Developer', action: 'Dev Override', detail: `Ubah role user ${userId} jadi ${newRole}` };
+    saveToDatabase({ ...db, users: newUsers, logs: [newLog, ...(db.logs||[])] });
+    showToast(`Otoritas di-override oleh Developer.`, 'success');
   };
   
   const handlePasswordOverride = (userId, newPassword) => {
-    const newUsers = db.users.map(u => u.id === userId ? { ...u, password: newPassword } : u);
-    updateDb('users', newUsers);
+    const newUsers = (db.users||[]).map(u => u.id === userId ? { ...u, password: newPassword } : u);
+    const newLog = { id: `LOG-${Date.now()}-${Math.floor(Math.random()*1000)}`, timestamp: new Date().toLocaleString(), user: 'Developer', action: 'Dev Override', detail: `Reset password paksa user ${userId}` };
+    saveToDatabase({ ...db, users: newUsers, logs: [newLog, ...(db.logs||[])] });
     showToast(`Password berhasil dijebol & diganti!`, 'success');
   };
 
@@ -1874,7 +1893,7 @@ const AdminDeveloperPanel = () => {
               <table className="w-full text-left min-w-[700px] border-collapse">
                  <thead><tr className="border-b border-emerald-900/50 text-xs text-emerald-500 tracking-widest"><th className="pb-4">NAMA OBJEK (USER)</th><th className="pb-4">PAKSA UBAH PASSWORD</th><th className="pb-4 text-right">TINGKAT AKSES SAAT INI</th></tr></thead>
                  <tbody className="divide-y divide-emerald-900/30">
-                   {db.users.map(u => (
+                   {(db.users||[]).map(u => (
                      <tr key={`dev-${u.id}`}>
                        <td className="py-4 text-sm font-bold text-emerald-100">{u.name} {u.role === 'developer' && <span className="text-[10px] ml-3 bg-red-900/80 text-red-300 px-2 py-1 rounded border border-red-700">Root Access</span>}</td>
                        <td className="py-4">
@@ -1897,9 +1916,23 @@ const AdminDeveloperPanel = () => {
 };
 
 export default function App() { return <AppStateProvider><AppContent /></AppStateProvider>; }
+
 const AppContent = () => {
   const { view, loggedInUser, isDbLoading } = useContext(AppStateContext);
+
   if (isDbLoading) return <SplashScreen />;
-  if (view === 'admin') return loggedInUser ? <AdminLayout /> : <AdminLogin />;
-  return <CustomerLayout>{view === 'dashboard' ? <DashboardView /> : view === 'catalog' ? <CatalogView /> : view === 'cart' ? <CartView /> : view === 'checkout' ? <CheckoutView /> : view === 'success' ? <SuccessView /> : view === 'member_auth' ? <MemberAuthView /> : view === 'member_profile' ? <MemberProfileView /> : <CatalogView />}</CustomerLayout>;
+  if (view === 'admin' && !loggedInUser) return <AdminLogin />;
+  if (view === 'admin' && loggedInUser) return <AdminLayout />;
+  
+  return (
+    <CustomerLayout>
+      {view === 'dashboard' && <DashboardView />}
+      {view === 'catalog' && <CatalogView />}
+      {view === 'cart' && <CartView />}
+      {view === 'checkout' && <CheckoutView />}
+      {view === 'success' && <SuccessView />}
+      {view === 'member_auth' && <MemberAuthView />}
+      {view === 'member_profile' && <MemberProfileView />}
+    </CustomerLayout>
+  );
 };
