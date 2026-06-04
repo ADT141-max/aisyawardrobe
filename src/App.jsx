@@ -590,6 +590,8 @@ const CatalogView = () => {
   );
 
   const openDetail = (product) => {
+    // MATIKAN POP-UP UNTUK TAMPILAN HP (Mobile / Layar di bawah 768px)
+    if (window.innerWidth < 768) return; 
     setSelectedDetail(product);
     setCurrentImgIdx(0);
   };
@@ -599,56 +601,69 @@ const CatalogView = () => {
   };
 
   return (
-    <div className="animate-fade-in-down">
-      <div className="relative mb-6">
-        <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
-        <input type="text" className="w-full pl-14 pr-6 py-4 border border-stone-200 rounded-full bg-white focus:outline-none focus:ring-2 focus:ring-rose-200 text-[16px] shadow-sm transition-all" placeholder="Cari nama atau ID pakaian..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-      </div>
-      <div className="flex overflow-x-auto pb-4 mb-6 gap-3 no-scrollbar">
-        <button onClick={() => setActiveCategory('Semua')} className={`px-6 py-2.5 rounded-full font-bold transition-all whitespace-nowrap ${activeCategory === 'Semua' ? 'bg-stone-900 text-white shadow-md' : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-50'}`}>Semua Koleksi</button>
-        {(db.categories||[]).map(cat => (
-          <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-6 py-2.5 rounded-full font-bold transition-all whitespace-nowrap ${activeCategory === cat ? `${cTheme.bg} text-white shadow-md` : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-50'}`}>{cat}</button>
-        ))}
-      </div>
-      
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {filteredProducts.map(product => {
-          const avail = getAvailableStock(product.id);
-          const inCart = cart.find(i => i.id === product.id)?.quantity || 0;
-          const canAdd = avail > inCart;
-          const isWished = loggedInMember?.wishlist?.includes(product.id);
+    <>
+      <div className="animate-fade-in-down">
+        <div className="relative mb-6">
+          <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
+          <input type="text" className="w-full pl-14 pr-6 py-4 border border-stone-200 rounded-full bg-white focus:outline-none focus:ring-2 focus:ring-rose-200 text-[16px] shadow-sm transition-all" placeholder="Cari nama atau ID pakaian..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+        </div>
+        <div className="flex overflow-x-auto pb-4 mb-6 gap-3 no-scrollbar">
+          <button onClick={() => setActiveCategory('Semua')} className={`px-6 py-2.5 rounded-full font-bold transition-all whitespace-nowrap ${activeCategory === 'Semua' ? 'bg-stone-900 text-white shadow-md' : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-50'}`}>Semua Koleksi</button>
+          {(db.categories||[]).map(cat => (
+            <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-6 py-2.5 rounded-full font-bold transition-all whitespace-nowrap ${activeCategory === cat ? `${cTheme.bg} text-white shadow-md` : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-50'}`}>{cat}</button>
+          ))}
+        </div>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {filteredProducts.map(product => {
+            const avail = getAvailableStock(product.id);
+            const inCart = cart.find(i => i.id === product.id)?.quantity || 0;
+            const canAdd = avail > inCart;
+            const isWished = loggedInMember?.wishlist?.includes(product.id);
 
-          return (
-            <div key={product.id} onClick={() => openDetail(product)} className="bg-white rounded-2xl shadow-sm border border-stone-100 overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col group relative cursor-pointer">
-              <button onClick={(e) => { e.stopPropagation(); toggleWishlist(product.id); }} className="absolute top-4 left-4 z-10 p-2 bg-white/90 backdrop-blur rounded-full shadow-md hover:scale-110 transition-transform">
-                <Heart className={`w-5 h-5 ${isWished ? 'fill-rose-500 text-rose-500' : 'text-stone-400'}`} />
-              </button>
+            return (
+              <div key={product.id} onClick={() => openDetail(product)} className="bg-white rounded-2xl shadow-sm border border-stone-100 overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col group relative cursor-pointer">
+                <button onClick={(e) => { e.stopPropagation(); toggleWishlist(product.id); }} className="absolute top-4 left-4 z-10 p-2 bg-white/90 backdrop-blur rounded-full shadow-md hover:scale-110 transition-transform">
+                  <Heart className={`w-5 h-5 ${isWished ? 'fill-rose-500 text-rose-500' : 'text-stone-400'}`} />
+                </button>
 
-              <div className="h-64 overflow-hidden relative bg-stone-100">
-                <img src={product.images?.[0] || 'https://placehold.co/400?text=No+Image'} alt={product.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
-                <div className="absolute top-4 right-4 bg-white/90 backdrop-blur px-3 py-1.5 rounded-full text-xs font-bold text-stone-800 uppercase tracking-wider">{product.category}</div>
-                {avail === 0 && <div className="absolute inset-0 bg-stone-900/60 backdrop-blur-sm flex items-center justify-center"><span className="bg-red-600 text-white px-6 py-2.5 rounded-full font-bold uppercase tracking-wider">Stok Habis</span></div>}
-              </div>
-              <div className="p-6 flex flex-col flex-grow">
-                <h3 className="font-serif font-bold text-xl text-stone-900 mb-1 leading-tight group-hover:text-rose-600 transition-colors">{product.name}</h3>
-                <p className="text-[10px] text-stone-400 font-mono bg-stone-50 px-2 py-1 rounded w-max mb-4">{product.id}</p>
-                <div className="mb-4">
-                  <p className={`${cTheme.text} font-bold text-xl`}>{formatRupiah(product.price)} <span className="text-sm font-light text-stone-500">/ hari</span></p>
-                  {product.deposit > 0 && <p className="text-xs font-bold text-amber-600 bg-amber-50 inline-block px-2 py-1 rounded mt-2">+ Deposit: {formatRupiah(product.deposit)}</p>}
+                <div className="h-64 overflow-hidden relative bg-stone-100">
+                  {/* Mobile Swipe Gallery Direct Integration */}
+                  {product.images?.length > 1 ? (
+                    <div className="flex overflow-x-auto snap-x snap-mandatory h-full w-full no-scrollbar">
+                      {product.images.map((img, idx) => (
+                        <img key={idx} src={img} alt={`${product.name} - Gambar ${idx + 1}`} className="w-full h-full object-cover shrink-0 snap-center md:group-hover:scale-110 transition-transform duration-700" />
+                      ))}
+                    </div>
+                  ) : (
+                    <img src={product.images?.[0] || 'https://placehold.co/400?text=No+Image'} alt={product.name} className="w-full h-full object-cover md:group-hover:scale-110 transition-transform duration-700" />
+                  )}
+                  
+                  <div className="absolute top-4 right-4 bg-white/90 backdrop-blur px-3 py-1.5 rounded-full text-xs font-bold text-stone-800 uppercase tracking-wider shadow-sm pointer-events-none">{product.category}</div>
+                  {avail === 0 && <div className="absolute inset-0 bg-stone-900/60 backdrop-blur-sm flex items-center justify-center pointer-events-none"><span className="bg-red-600 text-white px-6 py-2.5 rounded-full font-bold uppercase tracking-wider">Stok Habis</span></div>}
                 </div>
                 
-                <p className="text-sm text-stone-500 mb-6 line-clamp-2 font-light flex-grow">{product.desc}</p>
-                <div className="mt-auto pt-5 border-t border-stone-100 flex items-center justify-between">
-                  <span className="text-sm text-stone-500 font-medium">Sisa: {avail}</span>
-                  <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} disabled={!canAdd} className={`px-5 py-2.5 rounded-full font-bold transition-all active:scale-95 flex items-center gap-2 ${canAdd ? `${cTheme.bg} text-white shadow-md hover:shadow-lg` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}><ShoppingCart className="w-4 h-4" /> Sewa</button>
+                <div className="p-6 flex flex-col flex-grow">
+                  <h3 className="font-serif font-bold text-xl text-stone-900 mb-1 leading-tight group-hover:text-rose-600 transition-colors">{product.name}</h3>
+                  <p className="text-[10px] text-stone-400 font-mono bg-stone-50 px-2 py-1 rounded w-max mb-4">{product.id}</p>
+                  <div className="mb-4">
+                    <p className={`${cTheme.text} font-bold text-xl`}>{formatRupiah(product.price)} <span className="text-sm font-light text-stone-500">/ hari</span></p>
+                    {product.deposit > 0 && <p className="text-xs font-bold text-amber-600 bg-amber-50 inline-block px-2 py-1 rounded mt-2">+ Deposit: {formatRupiah(product.deposit)}</p>}
+                  </div>
+                  
+                  <p className="text-sm text-stone-500 mb-6 line-clamp-2 font-light flex-grow">{product.desc}</p>
+                  <div className="mt-auto pt-5 border-t border-stone-100 flex items-center justify-between">
+                    <span className="text-sm text-stone-500 font-medium">Sisa: {avail}</span>
+                    <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} disabled={!canAdd} className={`px-5 py-2.5 rounded-full font-bold transition-all active:scale-95 flex items-center gap-2 ${canAdd ? `${cTheme.bg} text-white shadow-md hover:shadow-lg` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}><ShoppingCart className="w-4 h-4" /> Sewa</button>
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
-      {/* Modal Detail Produk Mewah */}
+      {/* Modal Detail Produk Mewah (Hanya untuk Layar Lebar) */}
       {selectedDetail && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-stone-900/70 backdrop-blur-sm animate-fade-in-down" onClick={closeDetail}>
            <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row shadow-2xl relative" onClick={e => e.stopPropagation()}>
@@ -722,7 +737,7 @@ const CatalogView = () => {
            </div>
         </div>
       )}
-    </div>
+    </>
   );
 };
 
