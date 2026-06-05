@@ -38,13 +38,14 @@ const compressImage = (file) => {
       img.src = event.target.result;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 800; // Kompresi ringan agar upload cepat
+        // KOMPRESI EKSTREM: Diperkecil maksimal 600px agar aman dari batas 1MB Firebase
+        const MAX_WIDTH = 600; 
         let width = img.width;
         let height = img.height;
         if (width > MAX_WIDTH) { height = Math.round((height *= MAX_WIDTH / width)); width = MAX_WIDTH; }
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7)); // Format Base64
+        resolve(canvas.toDataURL('image/jpeg', 0.6)); // Kualitas 60% agar file sangat ringan
       };
     };
   });
@@ -64,6 +65,8 @@ const uploadImageToServer = async (base64Image) => {
     
     const data = await response.json();
     if (data.success) return data.data.url; 
+    
+    console.error("ImgBB menolak:", data);
     return base64Image;
   } catch (error) {
     console.error("Upload error:", error);
@@ -88,12 +91,12 @@ const getSocialLink = (type, value) => {
 };
 
 const Toast = ({ message, type, onClose }) => {
-  useEffect(() => { const timer = setTimeout(() => onClose(), 3000); return () => clearTimeout(timer); }, [onClose]);
+  useEffect(() => { const timer = setTimeout(() => onClose(), type === 'error' ? 5000 : 3000); return () => clearTimeout(timer); }, [onClose, type]);
   return (
-    <div className="fixed top-5 left-1/2 transform -translate-x-1/2 z-[100] animate-fade-in-down w-[90%] md:w-max max-w-md">
-      <div className={`flex items-center gap-3 px-6 py-3 rounded-xl shadow-lg border ${type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : type === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
-        {type === 'success' ? <CheckCircle className="w-5 h-5 flex-shrink-0 text-green-500" /> : type === 'error' ? <AlertCircle className="w-5 h-5 flex-shrink-0 text-red-500" /> : <Shield className="w-5 h-5 flex-shrink-0 text-blue-500" />}
-        <span className="font-medium text-sm leading-tight">{message}</span>
+    <div className="fixed top-5 left-1/2 transform -translate-x-1/2 z-[100] animate-fade-in-down w-[90%] md:w-max max-w-lg">
+      <div className={`flex items-center gap-3 px-6 py-4 rounded-xl shadow-2xl border-2 ${type === 'success' ? 'bg-green-50 border-green-400 text-green-800' : type === 'error' ? 'bg-red-50 border-red-500 text-red-900' : 'bg-blue-50 border-blue-400 text-blue-800'}`}>
+        {type === 'success' ? <CheckCircle className="w-6 h-6 flex-shrink-0 text-green-500" /> : type === 'error' ? <AlertCircle className="w-6 h-6 flex-shrink-0 text-red-600" /> : <Shield className="w-6 h-6 flex-shrink-0 text-blue-500" />}
+        <span className="font-medium text-sm leading-relaxed">{message}</span>
       </div>
     </div>
   );
@@ -160,7 +163,11 @@ const AppStateProvider = ({ children }) => {
          setDoc(stateDocRef, getInitialData());
       }
       setIsDbLoading(false);
-    }, (error) => { console.error("Firebase Sync Error:", error); setIsDbLoading(false); });
+    }, (error) => { 
+      console.error("Firebase Sync Error:", error); 
+      showToast(`Gagal Terhubung Firebase: ${error.message}`, "error");
+      setIsDbLoading(false); 
+    });
     return () => unsubscribe();
   }, []);
 
@@ -168,7 +175,7 @@ const AppStateProvider = ({ children }) => {
     // 🛡️ GEMBOK PENGAMAN ANTI-TERHAPUS (SAFETY LOCK)
     if (db.products && db.products.length > 0 && (!newDbState.products || newDbState.products.length === 0)) {
       console.error("Sistem Mencegah Penghapusan Massal!");
-      showToast("Gagal Sinkronisasi: Mencegah data terhapus secara tidak sengaja. Mohon refresh halaman!", "error");
+      showToast("Sistem Mencegah Penghapusan Seluruh Katalog. Mohon muat ulang halaman!", "error");
       return; 
     }
 
@@ -180,7 +187,9 @@ const AppStateProvider = ({ children }) => {
       setTimeout(() => setSaveStatus(''), 2000);
     } catch (error) { 
       setSaveStatus('Gagal ✗'); 
-      showToast("Data Gagal Disimpan! Terlalu besar.", "error");
+      console.error("ERROR FIREBASE:", error);
+      // Menampilkan alasan detail kenapa gagal (Bisa karena Rules, atau Ukuran Data > 1MB)
+      showToast(`Data Gagal Disimpan! Detail: ${error.message}`, "error");
     }
   };
 
