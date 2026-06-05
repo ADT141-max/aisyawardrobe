@@ -5,7 +5,7 @@ import {
   AlertCircle, Search, Menu, LogOut, User, Settings as SettingsIcon, 
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Upload, Shield, 
   Briefcase, FileText, Download, UploadCloud, Terminal,
-  UserPlus, Award, Gift, Users, Edit3, ClipboardList, Heart, Printer, MessageCircle, ExternalLink, MoreVertical
+  UserPlus, Award, Gift, Users, Edit3, ClipboardList, Heart, Printer, MessageCircle, ExternalLink, MoreVertical, Database
 } from 'lucide-react';
 
 import { initializeApp } from "firebase/app";
@@ -67,10 +67,10 @@ const uploadImageToServer = async (base64Image) => {
     if (data.success) return data.data.url; 
     
     console.error("ImgBB menolak:", data);
-    return base64Image;
+    return base64Image; // Fallback ke Base64 jika ImgBB gagal
   } catch (error) {
     console.error("Upload error:", error);
-    return base64Image;
+    return base64Image; // Fallback ke Base64
   }
 };
 
@@ -188,7 +188,7 @@ const AppStateProvider = ({ children }) => {
     } catch (error) { 
       setSaveStatus('Gagal ✗'); 
       console.error("ERROR FIREBASE:", error);
-      // Menampilkan alasan detail kenapa gagal (Bisa karena Rules, atau Ukuran Data > 1MB)
+      // ALARM PINTAR: Menampilkan alasan detail kenapa gagal (Bisa karena Rules, atau Ukuran Data > 1MB)
       showToast(`Data Gagal Disimpan! Detail: ${error.message}`, "error");
     }
   };
