@@ -1,10 +1,10 @@
-import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
+import React, { useState, useEffect, createContext, useContext } from 'react';
 import { 
   ShoppingCart, Home, LayoutDashboard, Package, Trash2, Plus, 
   X, Image as ImageIcon, CheckCircle, Clock, ChevronDown, BarChart3, 
   AlertCircle, Search, Menu, LogOut, User, Settings as SettingsIcon, 
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Upload, Shield, 
-  Briefcase, FileText, Database, Download, UploadCloud, Terminal,
+  Briefcase, FileText, Download, UploadCloud, Terminal,
   UserPlus, Award, Gift, Users, Edit3, ClipboardList, Heart, Printer, MessageCircle, ExternalLink, MoreVertical
 } from 'lucide-react';
 
@@ -165,6 +165,13 @@ const AppStateProvider = ({ children }) => {
   }, []);
 
   const saveToDatabase = async (newDbState) => {
+    // 🛡️ GEMBOK PENGAMAN ANTI-TERHAPUS (SAFETY LOCK)
+    if (db.products && db.products.length > 0 && (!newDbState.products || newDbState.products.length === 0)) {
+      console.error("Sistem Mencegah Penghapusan Massal!");
+      showToast("Gagal Sinkronisasi: Mencegah data terhapus secara tidak sengaja. Mohon refresh halaman!", "error");
+      return; 
+    }
+
     setDb(newDbState); 
     setSaveStatus('Menyimpan...');
     try {
@@ -185,6 +192,8 @@ const AppStateProvider = ({ children }) => {
   };
 
   const login = (username, password) => {
+    if (isDbLoading) return false;
+    
     const user = (db.users || []).find(u => u.username === username && u.password === password);
     if (user) { 
        setLoggedInUser(user); setView('admin'); 
@@ -579,9 +588,12 @@ const CatalogView = () => {
   const [activeCategory, setActiveCategory] = useState('Semua');
   const [searchQuery, setSearchQuery] = useState('');
   
-  // State untuk Pop-up Detail Barang & Slider Gambar
+  // State Pop-up Modal untuk Desktop
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [currentImgIdx, setCurrentImgIdx] = useState(0);
+
+  // State Card Memanjang untuk Mobile/iPad
+  const [expandedMobileId, setExpandedMobileId] = useState(null);
 
   const filteredProducts = (db.products||[]).filter(p => 
     p.status !== 'Maintenance' && 
@@ -590,10 +602,14 @@ const CatalogView = () => {
   );
 
   const openDetail = (product) => {
-    // MATIKAN POP-UP UNTUK TAMPILAN HP (Mobile / Layar di bawah 768px)
-    if (window.innerWidth < 768) return; 
-    setSelectedDetail(product);
-    setCurrentImgIdx(0);
+    // Layar Lebar (Desktop/Laptop >= 1024px) memunculkan Modal Mewah
+    if (window.innerWidth >= 1024) { 
+      setSelectedDetail(product);
+      setCurrentImgIdx(0);
+    } else {
+      // Layar Kecil (HP & iPad < 1024px) memunculkan efek memanjang (Accordion)
+      setExpandedMobileId(prev => prev === product.id ? null : product.id);
+    }
   };
   
   const closeDetail = () => {
@@ -620,6 +636,7 @@ const CatalogView = () => {
             const inCart = cart.find(i => i.id === product.id)?.quantity || 0;
             const canAdd = avail > inCart;
             const isWished = loggedInMember?.wishlist?.includes(product.id);
+            const isMobileExpanded = expandedMobileId === product.id;
 
             return (
               <div key={product.id} onClick={() => openDetail(product)} className="bg-white rounded-2xl shadow-sm border border-stone-100 overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col group relative cursor-pointer">
@@ -628,15 +645,15 @@ const CatalogView = () => {
                 </button>
 
                 <div className="h-64 overflow-hidden relative bg-stone-100">
-                  {/* Mobile Swipe Gallery Direct Integration */}
+                  {/* Gallery Swipe khusus HP/Card, mencegah click event menembus ke card */}
                   {product.images?.length > 1 ? (
-                    <div className="flex overflow-x-auto snap-x snap-mandatory h-full w-full no-scrollbar">
+                    <div className="flex overflow-x-auto snap-x snap-mandatory h-full w-full no-scrollbar" onClick={e => e.stopPropagation()}>
                       {product.images.map((img, idx) => (
-                        <img key={idx} src={img} alt={`${product.name} - Gambar ${idx + 1}`} className="w-full h-full object-cover shrink-0 snap-center md:group-hover:scale-110 transition-transform duration-700" />
+                        <img key={idx} src={img} alt={`${product.name} - Gambar ${idx + 1}`} className="w-full h-full object-cover shrink-0 snap-center lg:group-hover:scale-110 transition-transform duration-700" />
                       ))}
                     </div>
                   ) : (
-                    <img src={product.images?.[0] || 'https://placehold.co/400?text=No+Image'} alt={product.name} className="w-full h-full object-cover md:group-hover:scale-110 transition-transform duration-700" />
+                    <img src={product.images?.[0] || 'https://placehold.co/400?text=No+Image'} alt={product.name} className="w-full h-full object-cover lg:group-hover:scale-110 transition-transform duration-700" />
                   )}
                   
                   <div className="absolute top-4 right-4 bg-white/90 backdrop-blur px-3 py-1.5 rounded-full text-xs font-bold text-stone-800 uppercase tracking-wider shadow-sm pointer-events-none">{product.category}</div>
@@ -644,14 +661,28 @@ const CatalogView = () => {
                 </div>
                 
                 <div className="p-6 flex flex-col flex-grow">
-                  <h3 className="font-serif font-bold text-xl text-stone-900 mb-1 leading-tight group-hover:text-rose-600 transition-colors">{product.name}</h3>
+                  <div className="flex justify-between items-start mb-1">
+                     <h3 className="font-serif font-bold text-xl text-stone-900 leading-tight group-hover:text-rose-600 transition-colors pr-2">{product.name}</h3>
+                     <ChevronDown className={`w-5 h-5 text-stone-400 flex-shrink-0 transition-transform duration-300 lg:hidden ${isMobileExpanded ? 'rotate-180' : ''}`} />
+                  </div>
+                  
                   <p className="text-[10px] text-stone-400 font-mono bg-stone-50 px-2 py-1 rounded w-max mb-4">{product.id}</p>
                   <div className="mb-4">
                     <p className={`${cTheme.text} font-bold text-xl`}>{formatRupiah(product.price)} <span className="text-sm font-light text-stone-500">/ hari</span></p>
                     {product.deposit > 0 && <p className="text-xs font-bold text-amber-600 bg-amber-50 inline-block px-2 py-1 rounded mt-2">+ Deposit: {formatRupiah(product.deposit)}</p>}
                   </div>
                   
-                  <p className="text-sm text-stone-500 mb-6 line-clamp-2 font-light flex-grow">{product.desc}</p>
+                  <div className="flex flex-col flex-grow">
+                     <p className={`text-sm text-stone-500 font-light flex-grow ${isMobileExpanded ? 'mb-4' : 'mb-6 line-clamp-2'}`}>
+                       {product.desc}
+                     </p>
+                     {isMobileExpanded && product.productLink && (
+                         <a href={product.productLink} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} className="mb-6 inline-flex items-center justify-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-4 py-2.5 rounded-xl w-full transition-colors">
+                             <ExternalLink className="w-4 h-4"/> Buka Referensi Eksternal
+                         </a>
+                     )}
+                  </div>
+
                   <div className="mt-auto pt-5 border-t border-stone-100 flex items-center justify-between">
                     <span className="text-sm text-stone-500 font-medium">Sisa: {avail}</span>
                     <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} disabled={!canAdd} className={`px-5 py-2.5 rounded-full font-bold transition-all active:scale-95 flex items-center gap-2 ${canAdd ? `${cTheme.bg} text-white shadow-md hover:shadow-lg` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}><ShoppingCart className="w-4 h-4" /> Sewa</button>
@@ -663,10 +694,10 @@ const CatalogView = () => {
         </div>
       </div>
 
-      {/* Modal Detail Produk Mewah (Hanya untuk Layar Lebar) */}
+      {/* Modal Detail Produk Mewah (Hanya untuk Layar Lebar >= 1024px) */}
       {selectedDetail && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-stone-900/70 backdrop-blur-sm animate-fade-in-down" onClick={closeDetail}>
-           <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row shadow-2xl relative" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-stone-900/70 backdrop-blur-sm" onClick={closeDetail}>
+           <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row shadow-2xl relative animate-fade-in-down" onClick={e => e.stopPropagation()}>
               
               {/* Slider Gambar di Kiri */}
               <div className="w-full md:w-1/2 h-64 md:h-auto bg-stone-100 relative group flex-shrink-0">
