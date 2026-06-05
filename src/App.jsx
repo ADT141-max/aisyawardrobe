@@ -29,6 +29,7 @@ const stateDocRef = doc(dbFirestore, "aisya_database", "main_state");
 // Kunci Server Gambar Gratis (IMGBB)
 const IMGBB_API_KEY = "aab30f3a1714c46f739b7d56dd87a5b3"; 
 
+// Kompresi Gambar untuk memperingan beban ImgBB
 const compressImage = (file) => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -38,21 +39,24 @@ const compressImage = (file) => {
       img.src = event.target.result;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        // KOMPRESI EKSTREM: Diperkecil maksimal 600px agar aman dari batas 1MB Firebase
         const MAX_WIDTH = 600; 
         let width = img.width;
         let height = img.height;
         if (width > MAX_WIDTH) { height = Math.round((height *= MAX_WIDTH / width)); width = MAX_WIDTH; }
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.6)); // Kualitas 60% agar file sangat ringan
+        resolve(canvas.toDataURL('image/jpeg', 0.6)); 
       };
     };
   });
 };
 
+// Mengirim hanya ke ImgBB. Jika gagal, kembalikan null agar Firebase tidak kebanjiran data teks Base64!
 const uploadImageToServer = async (base64Image) => {
-  if (!IMGBB_API_KEY) return base64Image; 
+  if (!IMGBB_API_KEY) {
+    console.error("Kunci API ImgBB tidak ditemukan!");
+    return null; 
+  } 
   try {
     const base64Data = base64Image.split(',')[1]; 
     const formData = new FormData();
@@ -67,10 +71,10 @@ const uploadImageToServer = async (base64Image) => {
     if (data.success) return data.data.url; 
     
     console.error("ImgBB menolak:", data);
-    return base64Image; // Fallback ke Base64 jika ImgBB gagal
+    return null; 
   } catch (error) {
     console.error("Upload error:", error);
-    return base64Image; // Fallback ke Base64
+    return null; 
   }
 };
 
@@ -78,7 +82,6 @@ const AppStateContext = createContext();
 
 const formatRupiah = (number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number || 0);
 
-// Helper pengubah text sosmed menjadi Smart Link
 const getSocialLink = (type, value) => {
   if (!value) return '#';
   const cleanValue = value.replace('@', '').trim();
@@ -87,7 +90,7 @@ const getSocialLink = (type, value) => {
   if (t.includes('instagram') || t.includes('ig')) return `https://instagram.com/${cleanValue}`;
   if (t.includes('tiktok')) return `https://tiktok.com/@${cleanValue}`;
   if (value.startsWith('http')) return value;
-  return '#'; // Fallback
+  return '#'; 
 };
 
 const Toast = ({ message, type, onClose }) => {
@@ -172,7 +175,6 @@ const AppStateProvider = ({ children }) => {
   }, []);
 
   const saveToDatabase = async (newDbState) => {
-    // 🛡️ GEMBOK PENGAMAN ANTI-TERHAPUS (SAFETY LOCK)
     if (db.products && db.products.length > 0 && (!newDbState.products || newDbState.products.length === 0)) {
       console.error("Sistem Mencegah Penghapusan Massal!");
       showToast("Sistem Mencegah Penghapusan Seluruh Katalog. Mohon muat ulang halaman!", "error");
@@ -188,7 +190,6 @@ const AppStateProvider = ({ children }) => {
     } catch (error) { 
       setSaveStatus('Gagal ✗'); 
       console.error("ERROR FIREBASE:", error);
-      // ALARM PINTAR: Menampilkan alasan detail kenapa gagal (Bisa karena Rules, atau Ukuran Data > 1MB)
       showToast(`Data Gagal Disimpan! Detail: ${error.message}`, "error");
     }
   };
@@ -597,11 +598,9 @@ const CatalogView = () => {
   const [activeCategory, setActiveCategory] = useState('Semua');
   const [searchQuery, setSearchQuery] = useState('');
   
-  // State Pop-up Modal untuk Desktop
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [currentImgIdx, setCurrentImgIdx] = useState(0);
 
-  // State Card Memanjang untuk Mobile/iPad
   const [expandedMobileId, setExpandedMobileId] = useState(null);
 
   const filteredProducts = (db.products||[]).filter(p => 
@@ -611,12 +610,10 @@ const CatalogView = () => {
   );
 
   const openDetail = (product) => {
-    // Layar Lebar (Desktop/Laptop >= 1024px) memunculkan Modal Mewah
     if (window.innerWidth >= 1024) { 
       setSelectedDetail(product);
       setCurrentImgIdx(0);
     } else {
-      // Layar Kecil (HP & iPad < 1024px) memunculkan efek memanjang (Accordion)
       setExpandedMobileId(prev => prev === product.id ? null : product.id);
     }
   };
@@ -654,7 +651,6 @@ const CatalogView = () => {
                 </button>
 
                 <div className="h-64 overflow-hidden relative bg-stone-100">
-                  {/* Gallery Swipe khusus HP/Card, mencegah click event menembus ke card */}
                   {product.images?.length > 1 ? (
                     <div className="flex overflow-x-auto snap-x snap-mandatory h-full w-full no-scrollbar" onClick={e => e.stopPropagation()}>
                       {product.images.map((img, idx) => (
@@ -703,21 +699,16 @@ const CatalogView = () => {
         </div>
       </div>
 
-      {/* Modal Detail Produk Mewah (Hanya untuk Layar Lebar >= 1024px) */}
       {selectedDetail && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-stone-900/70 backdrop-blur-sm" onClick={closeDetail}>
            <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row shadow-2xl relative animate-fade-in-down" onClick={e => e.stopPropagation()}>
               
-              {/* Slider Gambar di Kiri */}
               <div className="w-full md:w-1/2 h-64 md:h-auto bg-stone-100 relative group flex-shrink-0">
                  <img src={selectedDetail.images?.[currentImgIdx] || 'https://placehold.co/400?text=No+Image'} className="w-full h-full object-cover" alt={selectedDetail.name} />
-                 {/* Tombol Geser (Maju/Mundur) Gambar */}
                  {selectedDetail.images?.length > 1 && (
                     <>
                       <button onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(prev => prev === 0 ? selectedDetail.images.length - 1 : prev - 1); }} className="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-white/70 hover:bg-white rounded-full text-stone-800 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"><ChevronLeft className="w-5 h-5"/></button>
                       <button onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(prev => prev === selectedDetail.images.length - 1 ? 0 : prev + 1); }} className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-white/70 hover:bg-white rounded-full text-stone-800 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"><ChevronRight className="w-5 h-5"/></button>
-                      
-                      {/* Indikator Titik Gambar */}
                       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 bg-stone-900/30 px-3 py-1.5 rounded-full backdrop-blur-sm">
                          {selectedDetail.images.map((_, idx) => (
                             <button key={idx} onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(idx); }} className={`w-2 h-2 rounded-full transition-all ${idx === currentImgIdx ? 'bg-white w-4' : 'bg-white/50 hover:bg-white/80'}`} />
@@ -728,7 +719,6 @@ const CatalogView = () => {
                  <button onClick={closeDetail} className="absolute top-4 left-4 p-2 bg-white/90 backdrop-blur rounded-full md:hidden text-stone-800 shadow-sm"><X className="w-5 h-5"/></button>
               </div>
 
-              {/* Rincian Detail di Kanan */}
               <div className="w-full md:w-1/2 p-6 md:p-10 flex flex-col overflow-y-auto no-scrollbar">
                   <div className="flex justify-between items-start mb-2">
                       <span className="bg-stone-100 text-stone-600 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider mb-3 inline-block">{selectedDetail.category}</span>
@@ -861,7 +851,11 @@ const CheckoutView = () => {
     setIsUploading(true);
     const compressed = await compressImage(file);
     const url = await uploadImageToServer(compressed);
-    setFormData(p => ({...p, ktpUrl: url})); 
+    if(url) {
+      setFormData(p => ({...p, ktpUrl: url})); 
+    } else {
+      showToast("Gagal upload KTP ke server gambar.", "error");
+    }
     setIsUploading(false);
   };
   
@@ -966,9 +960,15 @@ const MemberAuthView = () => {
       try {
         const compressed = await compressImage(file);
         const serverUrl = await uploadImageToServer(compressed);
-        setFormData(prev => ({ ...prev, [type]: serverUrl }));
-        showToast(`Gambar OK`, 'success');
-      } catch (error) { showToast(`Gagal mengunggah gambar`, 'error'); } 
+        if (serverUrl) {
+          setFormData(prev => ({ ...prev, [type]: serverUrl }));
+          showToast(`Gambar OK`, 'success');
+        } else {
+          showToast(`Gagal mengunggah gambar ke server`, 'error');
+        }
+      } catch (error) { 
+        showToast(`Gagal mengunggah gambar`, 'error'); 
+      } 
       finally { setIsUploading(prev => ({ ...prev, [type]: false })); }
     }
   };
@@ -1391,18 +1391,20 @@ const AdminInventory = () => {
     try {
       const uploadPromises = files.map(async (f) => {
         const compressed = await compressImage(f);
-        return await uploadImageToServer(compressed);
+        const url = await uploadImageToServer(compressed);
+        if(!url) throw new Error("Gagal ImgBB");
+        return url;
       });
-      const compressedUrls = await Promise.all(uploadPromises);
+      const validUrls = await Promise.all(uploadPromises);
       
       if (isEdit) {
-        setEditData(prev => ({ ...prev, images: [...(prev.images || []), ...compressedUrls] }));
+        setEditData(prev => ({ ...prev, images: [...(prev.images || []), ...validUrls] }));
       } else {
-        setFormData(prev => ({ ...prev, images: [...(prev.images || []), ...compressedUrls] }));
+        setFormData(prev => ({ ...prev, images: [...(prev.images || []), ...validUrls] }));
       }
       showToast('Gambar berhasil diunggah!', 'success');
     } catch (error) {
-      showToast('Gagal mengunggah gambar', 'error');
+      showToast('Gagal mengunggah gambar. Simpan saja teksnya.', 'error');
     }
   };
 
@@ -1777,9 +1779,13 @@ const AdminPrizes = () => {
     showToast('Mengkompresi gambar hadiah...', 'info');
     const compressed = await compressImage(file);
     const url = await uploadImageToServer(compressed);
-    setFormData(p => ({ ...p, image: url })); 
+    if(url) {
+      setFormData(p => ({ ...p, image: url })); 
+      showToast('Gambar OK', 'success');
+    } else {
+      showToast('Gagal mengunggah gambar.', 'error');
+    }
     setIsUploading(false);
-    showToast('Gambar OK', 'success');
   };
   const handleAdd = (e) => { e.preventDefault(); requireApproval('ADD_PRIZE', { id: `PRZ-${Date.now()}`, name: formData.name, points: parseInt(formData.points), desc: formData.desc, image: formData.image || '' }, 'Hadiah tersimpan.'); setFormData({ name: '', points: '', desc: '', image: null }); };
 
@@ -1880,9 +1886,13 @@ const AdminSystemSettings = () => {
     showToast('Mengkompresi gambar logo...', 'info');
     const compressed = await compressImage(file);
     const url = await uploadImageToServer(compressed);
-    setBConfig({...bConfig, logoUrl: url}); 
+    if (url) {
+      setBConfig({...bConfig, logoUrl: url}); 
+      showToast('Logo berhasil disiapkan.', 'success');
+    } else {
+      showToast('Gagal upload ke server gambar.', 'error');
+    }
     setIsUploading(false);
-    showToast('Logo berhasil disiapkan.', 'success');
   };
 
   const handlePasswordReset = (userId, newPassword) => {
