@@ -5,7 +5,7 @@ import {
   AlertCircle, Search, Menu, LogOut, User, Settings as SettingsIcon, 
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Upload, Shield, 
   Briefcase, FileText, Download, UploadCloud, Terminal,
-  UserPlus, Award, Gift, Users, Edit3, ClipboardList, Heart, Printer, MessageCircle, ExternalLink, MoreVertical, Database, Tag, Star, TrendingUp, Sparkles
+  UserPlus, Award, Gift, Users, Edit3, ClipboardList, Heart, Printer, MessageCircle, ExternalLink, MoreVertical, Database, Tag, Star, TrendingUp, Sparkles, Grid
 } from 'lucide-react';
 
 import { initializeApp } from "firebase/app";
@@ -109,22 +109,31 @@ const FloatingWA = () => {
 // ============================================================================
 // STATE MANAGEMENT & PROVIDER
 // ============================================================================
-const getInitialData = () => ({
-  products: [], categories: ['Kebaya', 'Jas', 'Batik', 'Gaun', 'Aksesoris'], orders: [],
-  users: [
-    { id: 'U0', username: 'dev', password: 'dev', name: 'Developer System', role: 'developer' },
-    { id: 'U1', username: 'owner', password: 'owner123', name: 'Owner Aisya', role: 'owner' },
-    { id: 'U2', username: 'manager', password: 'manager123', name: 'Manajer Operasional', role: 'manager' },
-    { id: 'U3', username: 'admin', password: 'admin123', name: 'Admin Kasir', role: 'admin' }
-  ],
-  members: [], prizes: [{ id: 'PRZ-01', name: 'Voucher Rp 50k', points: 500, image: '', desc: 'Diskon sewa' }],
-  promos: [], logs: [], approvals: [],
-  brandConfig: {
-    appName: 'Aisya Wardrobe', slogan: 'Sewa Pakaian Premium & Eksklusif', companyBio: 'Penyedia layanan sewa pakaian premium terpercaya untuk momen spesial Anda.',
-    logoUrl: '', appIcon: '', themeColor: 'rose', logoFont: 'Playfair Display', companyEmail: 'admin@aisyawardrobe.com',
-    socialMedia: [{ type: 'WhatsApp', value: '6281234567890', label: 'Hubungi Kami' }]
-  }
-});
+const getInitialData = () => {
+  let cachedBrandConfig = null;
+  try {
+    const stored = localStorage.getItem('aisya_brand_config');
+    if (stored) cachedBrandConfig = JSON.parse(stored);
+  } catch(e) {}
+
+  return {
+    products: [], categories: ['Kebaya', 'Jas', 'Batik', 'Gaun', 'Aksesoris'], orders: [],
+    users: [
+      { id: 'U0', username: 'dev', password: 'dev', name: 'Developer System', role: 'developer' },
+      { id: 'U1', username: 'owner', password: 'owner123', name: 'Owner Aisya', role: 'owner' },
+      { id: 'U2', username: 'manager', password: 'manager123', name: 'Manajer Operasional', role: 'manager' },
+      { id: 'U3', username: 'admin', password: 'admin123', name: 'Admin Kasir', role: 'admin' }
+    ],
+    members: [], prizes: [{ id: 'PRZ-01', name: 'Voucher Rp 50k', points: 500, image: '', desc: 'Diskon sewa' }],
+    promos: [], logs: [], approvals: [],
+    brandConfig: cachedBrandConfig || {
+      appName: 'Aisya Wardrobe', slogan: 'Sewa Pakaian Premium & Eksklusif', companyBio: 'Penyedia layanan sewa pakaian premium terpercaya untuk momen spesial Anda.',
+      logoUrl: '', appIcon: '', themeColor: 'rose', logoFont: 'Playfair Display', companyEmail: 'admin@aisyawardrobe.com',
+      socialMedia: [{ type: 'WhatsApp', value: '6281234567890', label: 'Hubungi Kami' }],
+      bentoCategories: ['Kebaya', 'Gaun', 'Jas'] // Default Bento Grid
+    }
+  };
+};
 
 const AppStateProvider = ({ children }) => {
   const [isDbLoading, setIsDbLoading] = useState(true);
@@ -146,17 +155,11 @@ const AppStateProvider = ({ children }) => {
   };
   const cTheme = themeColors[db.brandConfig?.themeColor] || themeColors.rose;
 
-  // Dynamic Font Loader
   useEffect(() => {
     const font = db.brandConfig?.logoFont || 'Playfair Display';
     const linkId = 'custom-logo-font';
     let link = document.getElementById(linkId);
-    if (!link) {
-      link = document.createElement('link');
-      link.id = linkId;
-      link.rel = 'stylesheet';
-      document.head.appendChild(link);
-    }
+    if (!link) { link = document.createElement('link'); link.id = linkId; link.rel = 'stylesheet'; document.head.appendChild(link); }
     link.href = `https://fonts.googleapis.com/css2?family=${font.replace(/ /g, '+')}:wght@400;700&display=swap`;
   }, [db.brandConfig?.logoFont]);
 
@@ -172,54 +175,39 @@ const AppStateProvider = ({ children }) => {
          if(!serverData.approvals) serverData.approvals = [];
          if(!serverData.logs) serverData.logs = [];
          if(!serverData.prizes) serverData.prizes = [];
+         if(!serverData.promos) serverData.promos = [];
          if(!serverData.brandConfig.logoFont) serverData.brandConfig.logoFont = 'Playfair Display';
+         if(!serverData.brandConfig.bentoCategories) serverData.brandConfig.bentoCategories = ['Kebaya', 'Gaun', 'Jas'];
 
          setDb(serverData);
+         try { localStorage.setItem('aisya_brand_config', JSON.stringify(serverData.brandConfig)); } catch(e) {}
+         
          setLoggedInUser(prev => { if (!prev) return null; return serverData.users.find(u => u.id === prev.id) || null; });
          setLoggedInMember(prev => { if (!prev) return null; return serverData.members.find(m => m.id === prev.id) || null; });
       } else {
          setDoc(stateDocRef, getInitialData());
       }
       setIsDbLoading(false);
-    }, (error) => { 
-      console.error("Firebase Sync Error:", error); 
-      showToast(`Gagal Terhubung Firebase: ${error.message}`, "error");
-      setIsDbLoading(false); 
-    });
+    }, (error) => { showToast(`Gagal Terhubung Firebase: ${error.message}`, "error"); setIsDbLoading(false); });
     return () => unsubscribe();
   }, []);
 
   const saveToDatabase = async (newDbState) => {
-    if (db.products && db.products.length > 0 && (!newDbState.products || newDbState.products.length === 0)) {
-      showToast("Sistem Mencegah Penghapusan Seluruh Katalog.", "error"); return; 
-    }
-    setDb(newDbState); 
-    setSaveStatus('Menyimpan...');
-    try {
-      await setDoc(stateDocRef, newDbState);
-      setSaveStatus('Tersimpan ✓');
-      setTimeout(() => setSaveStatus(''), 2000);
-    } catch (error) { 
-      setSaveStatus('Gagal ✗'); showToast(`Data Gagal Disimpan!`, "error");
-    }
+    if (db.products && db.products.length > 0 && (!newDbState.products || newDbState.products.length === 0)) { showToast("Mencegah Penghapusan Massal.", "error"); return; }
+    setDb(newDbState); setSaveStatus('Menyimpan...');
+    try { await setDoc(stateDocRef, newDbState); setSaveStatus('Tersimpan ✓'); setTimeout(() => setSaveStatus(''), 2000); } 
+    catch (error) { setSaveStatus('Gagal ✗'); showToast(`Gagal Disimpan!`, "error"); }
   };
 
   const updateDb = (key, value) => { saveToDatabase({ ...db, [key]: value }); };
-  const createLog = (dbState, action, detail, user = loggedInUser?.name || 'Sistem') => {
-    const newLog = { id: `LOG-${Date.now()}-${Math.floor(Math.random()*1000)}`, timestamp: new Date().toLocaleString(), user, action, detail };
-    return [newLog, ...(dbState.logs || [])];
-  };
+  const createLog = (dbState, action, detail, user = loggedInUser?.name || 'Sistem') => { return [{ id: `LOG-${Date.now()}-${Math.floor(Math.random()*1000)}`, timestamp: new Date().toLocaleString(), user, action, detail }, ...(dbState.logs || [])]; };
 
   const login = (username, password) => {
     if (isDbLoading) return false;
     const user = (db.users || []).find(u => u.username === username && u.password === password);
-    if (user) { 
-       setLoggedInUser(user); setView('admin'); 
-       saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Login Admin', user.name) }); return true; 
-    }
+    if (user) { setLoggedInUser(user); setView('admin'); saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Login Admin', user.name) }); return true; }
     if (username === 'dev' && password === 'dev') {
-       const devUser = { id: 'U0', username: 'dev', password: 'dev', name: 'Developer System', role: 'developer' };
-       setLoggedInUser(devUser); setView('admin'); 
+       setLoggedInUser({ id: 'U0', username: 'dev', password: 'dev', name: 'Developer System', role: 'developer' }); setView('admin'); 
        saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Bypass Login Developer', 'Developer') }); return true;
     }
     return false;
@@ -235,9 +223,7 @@ const AppStateProvider = ({ children }) => {
 
   const requireApproval = (actionType, payload, successMsg) => {
     if (!loggedInUser) return false;
-    if (['developer', 'owner'].includes(loggedInUser.role) || (loggedInUser.role === 'manager' && actionType !== 'UPDATE_USER')) { 
-      executeAction(actionType, payload); showToast(successMsg); return true; 
-    }
+    if (['developer', 'owner'].includes(loggedInUser.role) || (loggedInUser.role === 'manager' && actionType !== 'UPDATE_USER')) { executeAction(actionType, payload); showToast(successMsg); return true; }
     const newApp = { id: `APP-${Date.now()}`, actionType, payload, requestedBy: loggedInUser.name, requesterRole: loggedInUser.role, date: new Date().toLocaleString() };
     saveToDatabase({ ...db, approvals: [newApp, ...(db.approvals || [])], logs: createLog(db, 'Persetujuan', `Mengajukan: ${actionType}`) });
     showToast('Tindakan butuh persetujuan Manager/Owner', 'info'); return false;
@@ -353,11 +339,17 @@ const AppStateProvider = ({ children }) => {
     } else { showToast('Poin Anda tidak mencukupi.', 'error'); }
   };
 
+  const setBentoCategory = (index, category) => {
+    const newBento = [...(db.brandConfig.bentoCategories || ['','',''])];
+    newBento[index] = category;
+    updateDb('brandConfig', { ...db.brandConfig, bentoCategories: newBento });
+  };
+
   const value = {
     db, setDb, isDbLoading, saveStatus, updateDb, saveToDatabase, showToast,
     view, setView, cart, setCart, loggedInUser, loggedInMember, cTheme,
     login, logout, memberLogin, memberLogout, submitMemberRegistration, redeemPrize,
-    getAvailableStock, toggleWishlist, uploadImageToServer, compressImage,
+    getAvailableStock, toggleWishlist, uploadImageToServer, compressImage, setBentoCategory,
     addToCart: (p) => { setCart([...cart, { ...p, quantity: 1 }]); showToast(`${p.name} masuk keranjang.`); },
     removeFromCart: (id) => setCart(cart.filter(i => i.id !== id)),
     updateCartQuantity: (id, d) => setCart(cart.map(i => i.id === id && i.quantity + d > 0 ? { ...i, quantity: i.quantity + d } : i)),
@@ -377,7 +369,13 @@ const SplashScreen = () => {
   return (
     <div className="fixed inset-0 bg-stone-900 flex flex-col items-center justify-center z-[9999]">
       <div className="w-24 h-24 bg-gradient-to-tr from-amber-500 to-amber-700 rounded-full flex items-center justify-center mb-6 shadow-[0_0_40px_rgba(212,175,55,0.4)] animate-pulse">
-        <Package className="w-10 h-10 text-white" />
+        {db?.brandConfig?.logoUrl ? (
+          <img src={db.brandConfig.logoUrl} className="w-14 h-14 object-contain filter brightness-0 invert" alt="Logo" />
+        ) : db?.brandConfig?.appIcon ? (
+          <span className="text-4xl">{db.brandConfig.appIcon}</span>
+        ) : (
+          <Package className="w-10 h-10 text-white" />
+        )}
       </div>
       <h1 style={{ fontFamily: db?.brandConfig?.logoFont || 'Playfair Display' }} className="text-4xl text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-amber-400 to-amber-200 font-bold tracking-widest mb-3 animate-fade-in-down drop-shadow-md">
         {db?.brandConfig?.appName || 'Aisya Wardrobe'}
@@ -447,7 +445,7 @@ const CustomerLayout = ({ children }) => {
       </header>
 
       {showNav && (
-        <div className="fixed inset-0 z-50 bg-stone-900/50 backdrop-blur-sm md:hidden flex justify-start" onClick={() => setShowNav(false)}>
+        <div className="fixed inset-0 z-50 bg-stone-900/50 backdrop-blur-sm md:hidden flex justify-end" onClick={() => setShowNav(false)}>
           <div className="w-[80vw] max-w-sm bg-white h-full p-6 shadow-2xl animate-fade-in-down" onClick={e=>e.stopPropagation()}>
             <button onClick={() => setShowNav(false)} className="mb-8 p-2 bg-stone-100 rounded-full hover:bg-rose-100 hover:text-rose-600 transition-colors"><X className="w-5 h-5"/></button>
             <div className="space-y-6 flex flex-col">
@@ -471,7 +469,8 @@ const CustomerLayout = ({ children }) => {
         <div className="max-w-6xl mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-10">
           <div>
             <div className="flex items-center gap-3 mb-6 cursor-pointer" onClick={() => setView('dashboard')}>
-               {db.brandConfig.logoUrl ? <img src={db.brandConfig.logoUrl} alt="Logo" className="h-8 object-contain brightness-0 invert" /> : <Package className={`w-8 h-8 text-amber-500`} />}
+               {db.brandConfig.logoUrl ? <img src={db.brandConfig.logoUrl} alt="Logo" className="h-8 object-contain brightness-0 invert" /> : 
+                db.brandConfig.appIcon ? <span className="text-3xl">{db.brandConfig.appIcon}</span> : <Package className={`w-8 h-8 text-amber-500`} />}
                <span style={{ fontFamily: db.brandConfig.logoFont || 'Playfair Display' }} className="text-2xl font-bold text-white tracking-wider">{db.brandConfig.appName}</span>
             </div>
             <p className="text-sm leading-relaxed pr-4 font-light text-stone-400">{db.brandConfig.companyBio}</p>
@@ -502,6 +501,51 @@ const CustomerLayout = ({ children }) => {
           <p>&copy; {new Date().getFullYear()} {db.brandConfig.appName}. Hak Cipta Dilindungi.</p>
         </div>
       </footer>
+    </div>
+  );
+};
+
+// ============================================================================
+// KOMPONEN: MICRO-SLIDESHOW BENTO BOX (BERANDA)
+// ============================================================================
+const BentoCategoryBox = ({ categoryName, className }) => {
+  const { db, setView } = useContext(AppStateContext);
+  const [currentIdx, setCurrentIdx] = useState(0);
+
+  // Ambil gambar-gambar produk dari kategori yang dipilih
+  const categoryImages = useMemo(() => {
+    const productsInCat = (db.products || []).filter(p => p.category === categoryName && p.status !== 'Maintenance');
+    let images = [];
+    productsInCat.forEach(p => { if (p.images && p.images.length > 0) images.push(p.images[0]); });
+    return images.length > 0 ? images.slice(0, 5) : ['https://images.unsplash.com/photo-1550639524-a6f58345a278?q=80&w=800&auto=format&fit=crop']; // Fallback image
+  }, [db.products, categoryName]);
+
+  useEffect(() => {
+    if (categoryImages.length <= 1) return;
+    const interval = setInterval(() => { setCurrentIdx(prev => (prev + 1) % categoryImages.length); }, 3500);
+    return () => clearInterval(interval);
+  }, [categoryImages.length]);
+
+  return (
+    <div onClick={() => setView('catalog')} className={`relative overflow-hidden rounded-3xl cursor-pointer group shadow-sm hover:shadow-xl transition-all duration-500 ${className}`}>
+      {/* Background Slideshow */}
+      {categoryImages.map((img, idx) => (
+         <div key={idx} className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 group-hover:scale-110 ease-in-out ${idx === currentIdx ? 'opacity-100' : 'opacity-0'}`} style={{ backgroundImage: `url(${img})` }}></div>
+      ))}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+      
+      {/* Konten Kaca Buram */}
+      <div className="absolute bottom-6 left-6 right-6">
+         <div className="bg-white/20 backdrop-blur-md border border-white/30 p-5 rounded-2xl flex items-center justify-between group-hover:bg-amber-600/90 group-hover:border-amber-500 transition-colors duration-300">
+            <div>
+               <p className="text-white/80 text-[10px] font-bold uppercase tracking-widest mb-1 group-hover:text-amber-100 transition-colors">Koleksi Terpilih</p>
+               <h3 className="text-2xl font-serif font-bold text-white leading-none">{categoryName || 'Kategori'}</h3>
+            </div>
+            <div className="w-10 h-10 rounded-full bg-white text-stone-900 flex items-center justify-center transform translate-x-4 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 transition-all duration-300 shadow-lg">
+               <ChevronRight className="w-5 h-5"/>
+            </div>
+         </div>
+      </div>
     </div>
   );
 };
@@ -643,8 +687,12 @@ const DashboardView = () => {
     );
   }
 
+  const bentoCats = db.brandConfig?.bentoCategories || ['Kebaya', 'Gaun', 'Jas'];
+
   return (
     <div className="space-y-12 md:space-y-16 animate-fade-in-down w-full flex-grow">
+      
+      {/* HERO BANNER TETAP MEWAH */}
       <div className={`relative ${cTheme.bg} rounded-[2.5rem] overflow-hidden shadow-2xl min-h-[400px] flex items-center`}>
         <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1490481651871-ab68de25d43d?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-20 mix-blend-overlay"></div>
         <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/30 to-transparent"></div>
@@ -658,6 +706,27 @@ const DashboardView = () => {
         </div>
       </div>
 
+      {/* BENTO GRID (3 KOTAK MOSAIK) */}
+      <div className="relative">
+         <div className="flex justify-between items-end mb-8">
+            <div><h2 className="text-3xl font-serif font-bold text-stone-900 flex items-center gap-3"><Grid className="w-8 h-8 text-amber-500"/> Kategori Unggulan</h2><p className="text-stone-500 mt-2">Pilihan utama pelanggan untuk berbagai momen.</p></div>
+         </div>
+         
+         {/* Tampilan Desktop & Tablet (Grid Asimetris) */}
+         <div className="hidden md:grid grid-cols-3 grid-rows-2 gap-6 h-[500px]">
+            <BentoCategoryBox categoryName={bentoCats[0]} className="col-span-2 row-span-2" />
+            <BentoCategoryBox categoryName={bentoCats[1]} className="col-span-1 row-span-1" />
+            <BentoCategoryBox categoryName={bentoCats[2]} className="col-span-1 row-span-1" />
+         </div>
+
+         {/* Tampilan HP (Horizontal Swipe) */}
+         <div className="md:hidden flex overflow-x-auto gap-4 pb-6 no-scrollbar snap-x snap-mandatory">
+            <BentoCategoryBox categoryName={bentoCats[0]} className="w-[85vw] h-[350px] shrink-0 snap-center" />
+            <BentoCategoryBox categoryName={bentoCats[1]} className="w-[85vw] h-[350px] shrink-0 snap-center" />
+            <BentoCategoryBox categoryName={bentoCats[2]} className="w-[85vw] h-[350px] shrink-0 snap-center" />
+         </div>
+      </div>
+
       {promoProducts.length > 0 && (
         <div className="relative">
            <div className="flex justify-between items-end mb-8">
@@ -668,18 +737,6 @@ const DashboardView = () => {
            <button onClick={() => setView('catalog')} className="w-full mt-6 sm:hidden border-2 border-stone-200 text-stone-700 font-bold py-3 rounded-xl hover:bg-stone-50">Lihat Semua Promo</button>
         </div>
       )}
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center group hover:-translate-y-1 transition-transform">
-          <div className={`${cTheme.light} p-4 rounded-2xl mb-5`}><Package className="w-8 h-8"/></div><h3 className="font-bold text-stone-800 text-lg mb-2">Kualitas Terjamin</h3><p className="text-sm text-stone-500 leading-relaxed">Koleksi terawat, wangi, dan disetrika rapi sebelum sampai ke tangan Anda.</p>
-        </div>
-        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center group hover:-translate-y-1 transition-transform">
-          <div className={`${cTheme.light} p-4 rounded-2xl mb-5`}><Shield className="w-8 h-8"/></div><h3 className="font-bold text-stone-800 text-lg mb-2">Transaksi Aman</h3><p className="text-sm text-stone-500 leading-relaxed">Sistem deposit transparan yang akan dikembalikan penuh setelah sewa.</p>
-        </div>
-        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center group hover:-translate-y-1 transition-transform">
-          <div className={`${cTheme.light} p-4 rounded-2xl mb-5`}><Award className="w-8 h-8"/></div><h3 className="font-bold text-stone-800 text-lg mb-2">Member Reward</h3><p className="text-sm text-stone-500 leading-relaxed">Kumpulkan poin di setiap transaksi dan tukarkan dengan hadiah eksklusif.</p>
-        </div>
-      </div>
 
       {displayProducts.length > 0 && (
         <div>
@@ -706,7 +763,11 @@ const CatalogView = () => {
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [currentImgIdx, setCurrentImgIdx] = useState(0);
 
-  const filteredProducts = (db.products||[]).filter(p => p.status !== 'Maintenance' && (activeCategory === 'Semua' || p.category === activeCategory) && (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase())));
+  const filteredProducts = (db.products||[]).filter(p => 
+    p.status !== 'Maintenance' && 
+    (activeCategory === 'Semua' || p.category === activeCategory) &&
+    (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
 
   const openDetail = (product) => { setSelectedDetail(product); setCurrentImgIdx(0); };
   const closeDetail = () => setSelectedDetail(null);
@@ -1568,6 +1629,7 @@ const AdminInventory = () => {
                    {isExpanded && (
                      <div className="p-5 bg-stone-50 border-t border-stone-200 flex-1 flex flex-col">
                         <p className="text-sm text-stone-600 mb-5 flex-grow leading-relaxed">{p.desc}</p>
+                        
                         <div className="bg-white p-3 rounded-lg border border-stone-100 mb-5 text-sm font-bold text-amber-700">Uang Jaminan: {formatRupiah(p.deposit)}</div>
                         
                         {isEditing ? (
@@ -1577,6 +1639,7 @@ const AdminInventory = () => {
                              <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Stok Fisik</label><input type="number" value={editData.totalStock} onChange={e=>setEditData({...editData, totalStock: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
                              <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Deposit</label><input type="number" value={editData.deposit} onChange={e=>setEditData({...editData, deposit: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
                              <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Link Eksternal</label><input type="url" value={editData.productLink} onChange={e=>setEditData({...editData, productLink: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
+                             
                              <div>
                                <label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Album Foto Produk</label>
                                <div className="flex gap-2 overflow-x-auto pb-2 mt-2">
@@ -1914,7 +1977,7 @@ const AdminAccountSettings = () => {
 };
 
 const AdminSystemSettings = () => {
-  const { db, updateDb, showToast, loggedInUser, requireApproval, compressImage, uploadImageToServer } = useContext(AppStateContext);
+  const { db, updateDb, showToast, loggedInUser, requireApproval, compressImage, uploadImageToServer, setBentoCategory } = useContext(AppStateContext);
   const [bConfig, setBConfig] = useState(db.brandConfig);
   const [isUploading, setIsUploading] = useState(false);
 
@@ -1969,6 +2032,23 @@ const AdminSystemSettings = () => {
             <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Biografi Perusahaan</label><textarea rows="3" value={bConfig.companyBio} onChange={e=>setBConfig({...bConfig, companyBio: e.target.value})} className="w-full px-5 py-4 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
             <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Email Bisnis</label><input type="email" value={bConfig.companyEmail} onChange={e=>setBConfig({...bConfig, companyEmail: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
             
+            {/* PENGATURAN BENTO GRID */}
+            <div className="md:col-span-2 bg-amber-50 p-6 rounded-2xl border border-amber-200 mt-4">
+               <h3 className="font-bold text-stone-800 flex items-center gap-2 mb-2"><Grid className="w-5 h-5 text-amber-600"/> Highlight Beranda (Bento Mosaik)</h3>
+               <p className="text-sm text-stone-600 mb-5">Pilih 3 kategori produk untuk ditampilkan secara elegan di halaman beranda.</p>
+               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                 {[0, 1, 2].map(idx => (
+                    <div key={idx}>
+                      <label className="block text-xs font-bold text-amber-800 mb-2 uppercase tracking-wider">Slot {idx + 1}</label>
+                      <select value={bConfig.bentoCategories?.[idx] || ''} onChange={(e) => setBentoCategory(idx, e.target.value)} className="w-full px-4 py-3 bg-white border border-amber-300 rounded-xl outline-none font-bold text-stone-700 cursor-pointer shadow-sm">
+                         <option value="" disabled>Pilih Kategori...</option>
+                         {(db.categories||[]).map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                 ))}
+               </div>
+            </div>
+
             <div className="md:col-span-2 bg-stone-50 p-6 rounded-2xl border border-stone-200 mt-4">
               <div className="flex justify-between items-center mb-6"><label className="block text-base font-serif font-bold text-stone-800">Jejaring Sosial Dinamis</label><button type="button" onClick={()=>setBConfig({...bConfig, socialMedia: [...(bConfig.socialMedia || []), {type: 'WhatsApp', value: '', label: ''}]})} className="text-xs bg-stone-900 text-white px-4 py-2.5 rounded-lg font-bold shadow-md hover:bg-black">+ Akun Baru</button></div>
               <div className="space-y-4">
@@ -2078,7 +2158,7 @@ const AdminDeveloperPanel = () => {
             <div className="bg-[#1e293b] p-6 md:p-8 rounded-2xl border border-emerald-500/20 shadow-inner">
                <h3 className="text-base font-bold mb-6 flex items-center gap-3 text-emerald-300"><UploadCloud className="w-5 h-5"/> VERSI SISTEM APLIKASI</h3>
                <div className="space-y-4">
-                  <div className="px-5 py-4 bg-[#0f172a] rounded-xl flex justify-between items-center border border-emerald-900/50"><span className="text-sm font-bold text-emerald-500">Versi Build Aktif</span><span className="text-xs bg-emerald-900 text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-700">v6.4.0-PREMIUM</span></div>
+                  <div className="px-5 py-4 bg-[#0f172a] rounded-xl flex justify-between items-center border border-emerald-900/50"><span className="text-sm font-bold text-emerald-500">Versi Build Aktif</span><span className="text-xs bg-emerald-900 text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-700">v7.0.0-BENTO</span></div>
                   <button onClick={() => showToast('Mem-bypass limit HTTP...', 'success')} className="w-full py-4 bg-emerald-600 text-white hover:bg-emerald-500 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-emerald-900/50">Ping Git Repository Server</button>
                </div>
             </div>
