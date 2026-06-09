@@ -5,15 +5,15 @@ import {
   AlertCircle, Search, Menu, LogOut, User, Settings as SettingsIcon, 
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Upload, Shield, 
   Briefcase, FileText, Download, UploadCloud, Terminal,
-  UserPlus, Award, Gift, Users, Edit3, ClipboardList, Heart, Printer, 
-  MessageCircle, ExternalLink, MoreVertical, Database, Tag, Star, 
-  TrendingUp, Sparkles
+  UserPlus, Award, Gift, Users, Edit3, ClipboardList, Heart, Printer, MessageCircle, ExternalLink, MoreVertical, Database, Tag, Star, TrendingUp, Sparkles
 } from 'lucide-react';
 
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
 
-// Kunci Firebase Asli Aisya Wardrobe
+// ============================================================================
+// KONFIGURASI FIREBASE & SERVER GAMBAR
+// ============================================================================
 const firebaseConfig = {
   apiKey: "AIzaSyAtiK53dCj69ec0BRCwz4uJNuCAsV9dlUE",
   authDomain: "aisyawardrobe01.firebaseapp.com",
@@ -28,10 +28,8 @@ const app = initializeApp(firebaseConfig);
 const dbFirestore = getFirestore(app);
 const stateDocRef = doc(dbFirestore, "aisya_database", "main_state");
 
-// Kunci Server Gambar Gratis (IMGBB)
 const IMGBB_API_KEY = "aab30f3a1714c46f739b7d56dd87a5b3"; 
 
-// Kompresi Gambar untuk memperingan beban ImgBB
 const compressImage = (file) => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -53,37 +51,21 @@ const compressImage = (file) => {
   });
 };
 
-// Mengirim hanya ke ImgBB
 const uploadImageToServer = async (base64Image) => {
-  if (!IMGBB_API_KEY) {
-    console.error("Kunci API ImgBB tidak ditemukan!");
-    return null; 
-  } 
+  if (!IMGBB_API_KEY) return null; 
   try {
     const base64Data = base64Image.split(',')[1]; 
     const formData = new FormData();
     formData.append('image', base64Data);
-
-    const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-      method: 'POST',
-      body: formData
-    });
-    
+    const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, { method: 'POST', body: formData });
     const data = await response.json();
     if (data.success) return data.data.url; 
-    
-    console.error("ImgBB menolak:", data);
     return null; 
-  } catch (error) {
-    console.error("Upload error:", error);
-    return null; 
-  }
+  } catch (error) { return null; }
 };
 
 const AppStateContext = createContext();
-
 const formatRupiah = (number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number || 0);
-
 const getSocialLink = (type, value) => {
   if (!value) return '#';
   const cleanValue = value.replace('@', '').trim();
@@ -95,10 +77,13 @@ const getSocialLink = (type, value) => {
   return '#'; 
 };
 
+// ============================================================================
+// KOMPONEN GLOBAL (TOAST & WA)
+// ============================================================================
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => { const timer = setTimeout(() => onClose(), type === 'error' ? 5000 : 3000); return () => clearTimeout(timer); }, [onClose, type]);
   return (
-    <div className="fixed top-5 left-1/2 transform -translate-x-1/2 z-[100] animate-fade-in-down w-[90%] md:w-max max-w-lg">
+    <div className="fixed top-5 left-1/2 transform -translate-x-1/2 z-[9999] animate-fade-in-down w-[90%] md:w-max max-w-lg">
       <div className={`flex items-center gap-3 px-6 py-4 rounded-xl shadow-2xl border-2 ${type === 'success' ? 'bg-green-50 border-green-400 text-green-800' : type === 'error' ? 'bg-red-50 border-red-500 text-red-900' : 'bg-blue-50 border-blue-400 text-blue-800'}`}>
         {type === 'success' ? <CheckCircle className="w-6 h-6 flex-shrink-0 text-green-500" /> : type === 'error' ? <AlertCircle className="w-6 h-6 flex-shrink-0 text-red-600" /> : <Shield className="w-6 h-6 flex-shrink-0 text-blue-500" />}
         <span className="font-medium text-sm leading-relaxed">{message}</span>
@@ -107,6 +92,23 @@ const Toast = ({ message, type, onClose }) => {
   );
 };
 
+const FloatingWA = () => {
+  const { db } = useContext(AppStateContext);
+  const waNumber = db.brandConfig?.socialMedia?.find(s => s.type === 'WhatsApp' || s.type === 'WA')?.value || '';
+  if (!waNumber) return null;
+  const text = encodeURIComponent(`Halo Admin ${db.brandConfig.appName}, saya butuh bantuan nih...`);
+  const link = `https://wa.me/${waNumber.replace(/\D/g,'')}?text=${text}`;
+  return (
+    <a href={link} target="_blank" rel="noopener noreferrer" className="fixed bottom-8 left-8 z-[90] flex items-center justify-center w-14 h-14 bg-gradient-to-tr from-amber-500 to-amber-700 text-white rounded-full shadow-[0_10px_25px_-5px_rgba(212,175,55,0.5)] hover:scale-110 transition-all duration-300 group">
+      <span className="absolute w-full h-full rounded-full bg-amber-500 opacity-50 animate-ping"></span>
+      <MessageCircle className="w-7 h-7 relative z-10" />
+    </a>
+  );
+};
+
+// ============================================================================
+// STATE MANAGEMENT & PROVIDER
+// ============================================================================
 const getInitialData = () => ({
   products: [], categories: ['Kebaya', 'Jas', 'Batik', 'Gaun', 'Aksesoris'], orders: [],
   users: [
@@ -119,7 +121,7 @@ const getInitialData = () => ({
   promos: [], logs: [], approvals: [],
   brandConfig: {
     appName: 'Aisya Wardrobe', slogan: 'Sewa Pakaian Premium & Eksklusif', companyBio: 'Penyedia layanan sewa pakaian premium terpercaya untuk momen spesial Anda.',
-    logoUrl: '', appIcon: '', themeColor: 'rose', companyEmail: 'admin@aisyawardrobe.com',
+    logoUrl: '', appIcon: '', themeColor: 'rose', logoFont: 'Playfair Display', companyEmail: 'admin@aisyawardrobe.com',
     socialMedia: [{ type: 'WhatsApp', value: '6281234567890', label: 'Hubungi Kami' }]
   }
 });
@@ -131,7 +133,6 @@ const AppStateProvider = ({ children }) => {
   const showToast = (message, type = 'success') => setToast({ message, type });
 
   const [db, setDb] = useState(getInitialData());
-
   const [view, setView] = useState('dashboard');
   const [cart, setCart] = useState([]);
   const [loggedInUser, setLoggedInUser] = useState(null);
@@ -145,7 +146,20 @@ const AppStateProvider = ({ children }) => {
   };
   const cTheme = themeColors[db.brandConfig?.themeColor] || themeColors.rose;
 
-  // Real-time Firebase Link
+  // Dynamic Font Loader
+  useEffect(() => {
+    const font = db.brandConfig?.logoFont || 'Playfair Display';
+    const linkId = 'custom-logo-font';
+    let link = document.getElementById(linkId);
+    if (!link) {
+      link = document.createElement('link');
+      link.id = linkId;
+      link.rel = 'stylesheet';
+      document.head.appendChild(link);
+    }
+    link.href = `https://fonts.googleapis.com/css2?family=${font.replace(/ /g, '+')}:wght@400;700&display=swap`;
+  }, [db.brandConfig?.logoFont]);
+
   useEffect(() => {
     const unsubscribe = onSnapshot(stateDocRef, (docSnap) => {
       if (docSnap.exists()) {
@@ -158,10 +172,9 @@ const AppStateProvider = ({ children }) => {
          if(!serverData.approvals) serverData.approvals = [];
          if(!serverData.logs) serverData.logs = [];
          if(!serverData.prizes) serverData.prizes = [];
-         if(!serverData.promos) serverData.promos = [];
+         if(!serverData.brandConfig.logoFont) serverData.brandConfig.logoFont = 'Playfair Display';
 
          setDb(serverData);
-         
          setLoggedInUser(prev => { if (!prev) return null; return serverData.users.find(u => u.id === prev.id) || null; });
          setLoggedInMember(prev => { if (!prev) return null; return serverData.members.find(m => m.id === prev.id) || null; });
       } else {
@@ -178,11 +191,8 @@ const AppStateProvider = ({ children }) => {
 
   const saveToDatabase = async (newDbState) => {
     if (db.products && db.products.length > 0 && (!newDbState.products || newDbState.products.length === 0)) {
-      console.error("Sistem Mencegah Penghapusan Massal!");
-      showToast("Sistem Mencegah Penghapusan Seluruh Katalog. Mohon muat ulang halaman!", "error");
-      return; 
+      showToast("Sistem Mencegah Penghapusan Seluruh Katalog.", "error"); return; 
     }
-
     setDb(newDbState); 
     setSaveStatus('Menyimpan...');
     try {
@@ -190,14 +200,11 @@ const AppStateProvider = ({ children }) => {
       setSaveStatus('Tersimpan ✓');
       setTimeout(() => setSaveStatus(''), 2000);
     } catch (error) { 
-      setSaveStatus('Gagal ✗'); 
-      console.error("ERROR FIREBASE:", error);
-      showToast(`Data Gagal Disimpan! Detail: ${error.message}`, "error");
+      setSaveStatus('Gagal ✗'); showToast(`Data Gagal Disimpan!`, "error");
     }
   };
 
   const updateDb = (key, value) => { saveToDatabase({ ...db, [key]: value }); };
-
   const createLog = (dbState, action, detail, user = loggedInUser?.name || 'Sistem') => {
     const newLog = { id: `LOG-${Date.now()}-${Math.floor(Math.random()*1000)}`, timestamp: new Date().toLocaleString(), user, action, detail };
     return [newLog, ...(dbState.logs || [])];
@@ -205,27 +212,20 @@ const AppStateProvider = ({ children }) => {
 
   const login = (username, password) => {
     if (isDbLoading) return false;
-    
     const user = (db.users || []).find(u => u.username === username && u.password === password);
     if (user) { 
        setLoggedInUser(user); setView('admin'); 
-       saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Login Admin', user.name) });
-       return true; 
+       saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Login Admin', user.name) }); return true; 
     }
     if (username === 'dev' && password === 'dev') {
        const devUser = { id: 'U0', username: 'dev', password: 'dev', name: 'Developer System', role: 'developer' };
        setLoggedInUser(devUser); setView('admin'); 
-       saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Bypass Login Developer', 'Developer') });
-       return true;
+       saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Bypass Login Developer', 'Developer') }); return true;
     }
     return false;
   };
   
-  const logout = () => { 
-    saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Logout Admin', loggedInUser?.name) });
-    setLoggedInUser(null); setView('dashboard'); 
-  };
-
+  const logout = () => { saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Logout Admin', loggedInUser?.name) }); setLoggedInUser(null); setView('dashboard'); };
   const memberLogin = (username, password) => {
     const member = (db.members || []).find(m => m.username === username && m.password === password && m.status === 'approved');
     if (member) { setLoggedInMember(member); setView('member_profile'); showToast(`Selamat datang, ${member.name}!`); return true; }
@@ -238,21 +238,13 @@ const AppStateProvider = ({ children }) => {
     if (['developer', 'owner'].includes(loggedInUser.role) || (loggedInUser.role === 'manager' && actionType !== 'UPDATE_USER')) { 
       executeAction(actionType, payload); showToast(successMsg); return true; 
     }
-    
     const newApp = { id: `APP-${Date.now()}`, actionType, payload, requestedBy: loggedInUser.name, requesterRole: loggedInUser.role, date: new Date().toLocaleString() };
-    saveToDatabase({
-      ...db,
-      approvals: [newApp, ...(db.approvals || [])],
-      logs: createLog(db, 'Persetujuan', `Mengajukan: ${actionType}`)
-    });
-    showToast('Tindakan butuh persetujuan Manager/Owner', 'info'); 
-    return false;
+    saveToDatabase({ ...db, approvals: [newApp, ...(db.approvals || [])], logs: createLog(db, 'Persetujuan', `Mengajukan: ${actionType}`) });
+    showToast('Tindakan butuh persetujuan Manager/Owner', 'info'); return false;
   };
 
   const executeAction = (actionType, payload) => {
-    let newDb = { ...db };
-    let actStr = ''; let detStr = '';
-
+    let newDb = { ...db }; let actStr = ''; let detStr = '';
     switch (actionType) {
       case 'ADD_PRODUCT': newDb.products = [payload, ...(newDb.products||[])]; actStr='Inventaris'; detStr=`Tambah: ${payload.name}`; break;
       case 'EDIT_PRODUCT': newDb.products = (newDb.products||[]).map(p => p.id === payload.id ? payload : p); actStr='Inventaris'; detStr=`Edit: ${payload.id}`; break;
@@ -261,31 +253,23 @@ const AppStateProvider = ({ children }) => {
       case 'ADD_CATEGORY': newDb.categories = [...(newDb.categories||[]), payload]; actStr='Kategori'; detStr=`Tambah: ${payload}`; break;
       case 'DELETE_CATEGORY': newDb.categories = (newDb.categories||[]).filter(c => c !== payload); actStr='Kategori'; detStr=`Hapus: ${payload}`; break;
       case 'UPDATE_ORDER': newDb.orders = (newDb.orders||[]).map(o => o.id === payload.id ? { ...o, status: payload.status, denda: payload.denda||0, totalRefundDeposit: payload.refund||0 } : o); actStr='Pesanan'; detStr=`Status ${payload.id} -> ${payload.status}`; break;
-      
       case 'COMPLETE_ORDER': 
         newDb.orders = (newDb.orders||[]).map(o => o.id === payload.orderId ? { ...o, status: payload.newStatus, denda: payload.denda||0, totalRefundDeposit: payload.refund||0 } : o);
-        newDb.products = (newDb.products||[]).map(p => payload.itemIds.includes(p.id) ? { ...p, status: 'Maintenance' } : p);
-        actStr='Pesanan'; detStr=`Selesai & Baju ke Maintenance: ${payload.orderId}`; break;
+        newDb.products = (newDb.products||[]).map(p => payload.itemIds.includes(p.id) ? { ...p, status: 'Maintenance' } : p); actStr='Pesanan'; detStr=`Selesai & Baju ke Maintenance: ${payload.orderId}`; break;
       case 'CANCEL_ORDER': 
         newDb.orders = (newDb.orders||[]).map(o => o.id === payload.orderId ? { ...o, status: payload.newStatus } : o);
-        newDb.products = (newDb.products||[]).map(p => payload.itemIds.includes(p.id) ? { ...p, status: 'Maintenance' } : p);
-        actStr='Pesanan'; detStr=`Batal & Baju ke Maintenance: ${payload.orderId}`; break;
-
+        newDb.products = (newDb.products||[]).map(p => payload.itemIds.includes(p.id) ? { ...p, status: 'Maintenance' } : p); actStr='Pesanan'; detStr=`Batal & Baju ke Maintenance: ${payload.orderId}`; break;
       case 'REGISTER_MEMBER':
         const newId = `MEM-${new Date().getFullYear().toString().slice(-2)}${String((newDb.members||[]).length + 1).padStart(3, '0')}`;
-        newDb.members = [{ ...payload, id: newId, points: 0, status: 'approved', wishlist: [] }, ...(newDb.members||[])];
-        actStr='Member'; detStr=`Setuju member: ${newId}`; break;
+        newDb.members = [{ ...payload, id: newId, points: 0, status: 'approved', wishlist: [] }, ...(newDb.members||[])]; actStr='Member'; detStr=`Setuju member: ${newId}`; break;
       case 'UPDATE_USER': 
         newDb.users = (newDb.users||[]).map(u => u.id === payload.userId ? { ...u, ...payload } : u);
-        if(loggedInUser?.id === payload.userId) setLoggedInUser(prev => ({...prev, ...payload}));
-        actStr='Pengguna'; detStr=`Update Profil/Pass: ${payload.username}`; break;
+        if(loggedInUser?.id === payload.userId) setLoggedInUser(prev => ({...prev, ...payload})); actStr='Pengguna'; detStr=`Update Profil/Pass: ${payload.username}`; break;
       case 'ADD_PRIZE': newDb.prizes = [payload, ...(newDb.prizes||[])]; actStr='Hadiah'; detStr=`Tambah: ${payload.name}`; break;
       case 'DELETE_PRIZE': newDb.prizes = (newDb.prizes||[]).filter(p => p.id !== payload.id); actStr='Hadiah'; detStr=`Hapus: ${payload.id}`; break;
       default: break;
     }
-    
-    if(actStr) { newDb.logs = createLog(newDb, actStr, detStr); }
-    saveToDatabase(newDb);
+    if(actStr) { newDb.logs = createLog(newDb, actStr, detStr); } saveToDatabase(newDb);
   };
 
   const handleApproval = (id, action) => {
@@ -296,9 +280,7 @@ const AppStateProvider = ({ children }) => {
 
   const getAvailableStock = (productId) => {
     const product = (db.products||[]).find(p => p.id === productId); if (!product || product.status === 'Maintenance') return 0;
-    const rented = (db.orders||[]).filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status)).reduce((total, order) => {
-      const item = order.items.find(i => i.id === productId); return total + (item ? item.quantity : 0);
-    }, 0);
+    const rented = (db.orders||[]).filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status)).reduce((total, order) => { const item = order.items.find(i => i.id === productId); return total + (item ? item.quantity : 0); }, 0);
     return product.totalStock - rented;
   };
 
@@ -307,21 +289,16 @@ const AppStateProvider = ({ children }) => {
     const wishlist = loggedInMember.wishlist || [];
     const isWished = wishlist.includes(productId);
     const newWishlist = isWished ? wishlist.filter(id => id !== productId) : [...wishlist, productId];
-    
-    const updatedMember = { ...loggedInMember, wishlist: newWishlist };
-    setLoggedInMember(updatedMember);
+    const updatedMember = { ...loggedInMember, wishlist: newWishlist }; setLoggedInMember(updatedMember);
     const newMembers = (db.members||[]).map(m => m.id === updatedMember.id ? updatedMember : m);
-    saveToDatabase({ ...db, members: newMembers });
-    showToast(isWished ? 'Dihapus dari wishlist' : 'Tersimpan di wishlist!');
+    saveToDatabase({ ...db, members: newMembers }); showToast(isWished ? 'Dihapus dari wishlist' : 'Tersimpan di wishlist!');
   };
 
   const processOrder = (formData, isWA = false) => {
     const subtotal = cart.reduce((sum, item) => sum + ((item.discountPrice > 0 ? item.discountPrice : item.price) * item.quantity), 0);
     const totalDeposit = cart.reduce((sum, item) => sum + ((item.deposit || 0) * item.quantity), 0);
     const duration = formData.duration || 1;
-    const totalSewa = subtotal * duration;
-    const totalBiaya = totalSewa + totalDeposit; 
-    
+    const totalSewa = subtotal * duration; const totalBiaya = totalSewa + totalDeposit; 
     const earnedPoints = loggedInMember ? Math.floor(totalSewa / 10000) : 0;
     const newOrderId = `ORD-${2000 + (db.orders ? db.orders.length : 0) + 1}`;
 
@@ -329,25 +306,15 @@ const AppStateProvider = ({ children }) => {
       id: newOrderId, date: new Date().toISOString().split('T')[0],
       customer: { name: formData.name, phone: formData.phone, identity: formData.identity, ktpUrl: formData.ktpUrl },
       items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, discountPrice: c.discountPrice || 0, deposit: c.deposit||0, quantity: c.quantity, images: c.images||[] })),
-      duration, startDate: formData.startDate, endDate: formData.endDate,
-      totalSewa, totalDeposit, total: totalBiaya, status: 'Menunggu Konfirmasi',
-      memberId: loggedInMember?.id || null, earnedPoints, denda: 0
+      duration, startDate: formData.startDate, endDate: formData.endDate, totalSewa, totalDeposit, total: totalBiaya, status: 'Menunggu Konfirmasi', memberId: loggedInMember?.id || null, earnedPoints, denda: 0
     };
     
-    let newDb = { 
-      ...db, 
-      orders: [newOrder, ...(db.orders || [])],
-      logs: createLog(db, 'Pelanggan', `Pesanan masuk: ${newOrder.id}`, 'Pelanggan')
-    };
-    
+    let newDb = { ...db, orders: [newOrder, ...(db.orders || [])], logs: createLog(db, 'Pelanggan', `Pesanan masuk: ${newOrder.id}`, 'Pelanggan') };
     if (loggedInMember) {
-      const um = { ...loggedInMember, points: loggedInMember.points + earnedPoints };
-      setLoggedInMember(um);
+      const um = { ...loggedInMember, points: loggedInMember.points + earnedPoints }; setLoggedInMember(um);
       newDb.members = (newDb.members || []).map(m => m.id === um.id ? um : m);
     }
-
-    saveToDatabase(newDb); 
-    setCart([]); setView('success'); 
+    saveToDatabase(newDb); setCart([]); setView('success'); 
 
     if (isWA) {
       const waNumber = db.brandConfig?.socialMedia?.find(s => s.type === 'WhatsApp' || s.type === 'WA')?.value || '';
@@ -360,64 +327,30 @@ const AppStateProvider = ({ children }) => {
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`
       <html><head><title>Invoice ${order.id}</title>
-      <style>
-        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px; color: #333; }
-        .header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; }
-        .title { font-size: 24px; font-weight: bold; margin: 0; color: #000; }
-        .row { display: flex; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px solid #fafafa; padding-bottom: 10px; }
-        .total { font-size: 18px; font-weight: bold; border-top: 2px solid #333; padding-top: 15px; margin-top: 15px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
-      </style></head><body>
-      <div class="header">
-        <h1 class="title">${db.brandConfig.appName}</h1>
-        <p>INVOICE PENYEWAAN</p>
-      </div>
-      <div class="row"><span>ID Pesanan:</span> <strong>${order.id}</strong></div>
-      <div class="row"><span>Pelanggan:</span> <strong>${order.customer.name} (${order.customer.phone})</strong></div>
-      <div class="row"><span>Tanggal Sewa:</span> <strong>${order.startDate} s/d ${order.endDate} (${order.duration} Hari)</strong></div>
-      
-      <table>
-        <tr><th>Barang</th><th>Qty</th><th>Harga/Hr</th><th>Deposit</th></tr>
-        ${order.items.map(i => {
-          const effPrice = i.discountPrice > 0 ? i.discountPrice : i.price;
-          return `<tr><td>${i.name}</td><td>${i.quantity}</td><td>${formatRupiah(effPrice)}</td><td>${formatRupiah(i.deposit)}</td></tr>`;
-        }).join('')}
-      </table>
-      
-      <div class="row"><span>Total Biaya Sewa:</span> <span>${formatRupiah(order.totalSewa)}</span></div>
-      <div class="row"><span>Total Uang Jaminan (Deposit):</span> <span>${formatRupiah(order.totalDeposit)}</span></div>
-      <div class="row total"><span>TOTAL KESELURUHAN:</span> <span>${formatRupiah(order.total)}</span></div>
-      ${order.status === 'Selesai' ? `<div class="row"><span>Denda Keterlambatan/Kerusakan:</span> <span style="color:red">-${formatRupiah(order.denda)}</span></div>
-      <div class="row total"><span>DEPOSIT DIKEMBALIKAN:</span> <span>${formatRupiah(order.totalRefundDeposit)}</span></div>` : ''}
-      
-      <div style="margin-top: 50px; text-align: center; font-size: 12px; color: #888;">
-        Terima kasih telah mempercayakan momen spesial Anda pada ${db.brandConfig.appName}.<br/>
-        Barang sewaan wajib dikembalikan tepat waktu untuk menghindari denda.
-      </div>
-      <script>window.print(); window.onafterprint = function(){ window.close(); }</script>
-      </body></html>
+      <style>body { font-family: sans-serif; padding: 40px; } .header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; } .title { font-size: 24px; font-family: '${db.brandConfig.logoFont}', serif; font-weight: bold; } .row { display: flex; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px solid #fafafa; padding-bottom: 10px; } .total { font-size: 18px; font-weight: bold; border-top: 2px solid #333; padding-top: 15px; margin-top: 15px; } table { width: 100%; border-collapse: collapse; margin-bottom: 30px; } th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }</style></head><body>
+      <div class="header"><h1 class="title">${db.brandConfig.appName}</h1><p>INVOICE PENYEWAAN</p></div>
+      <div class="row"><span>ID Pesanan:</span> <strong>${order.id}</strong></div><div class="row"><span>Pelanggan:</span> <strong>${order.customer.name} (${order.customer.phone})</strong></div><div class="row"><span>Tanggal Sewa:</span> <strong>${order.startDate} s/d ${order.endDate} (${order.duration} Hari)</strong></div>
+      <table><tr><th>Barang</th><th>Qty</th><th>Harga/Hr</th><th>Deposit</th></tr>${order.items.map(i => { const effPrice = i.discountPrice > 0 ? i.discountPrice : i.price; return `<tr><td>${i.name}</td><td>${i.quantity}</td><td>${formatRupiah(effPrice)}</td><td>${formatRupiah(i.deposit)}</td></tr>`; }).join('')}</table>
+      <div class="row"><span>Total Biaya Sewa:</span> <span>${formatRupiah(order.totalSewa)}</span></div><div class="row"><span>Total Uang Jaminan:</span> <span>${formatRupiah(order.totalDeposit)}</span></div><div class="row total"><span>TOTAL KESELURUHAN:</span> <span>${formatRupiah(order.total)}</span></div>
+      ${order.status === 'Selesai' ? `<div class="row"><span>Denda Keterlambatan/Kerusakan:</span> <span style="color:red">-${formatRupiah(order.denda)}</span></div><div class="row total"><span>DEPOSIT DIKEMBALIKAN:</span> <span>${formatRupiah(order.totalRefundDeposit)}</span></div>` : ''}
+      <div style="margin-top: 50px; text-align: center; font-size: 12px; color: #888;">Terima kasih telah mempercayakan momen spesial Anda pada ${db.brandConfig.appName}.<br/>Barang sewaan wajib dikembalikan tepat waktu untuk menghindari denda.</div>
+      <script>window.print(); window.onafterprint = function(){ window.close(); }</script></body></html>
     `);
     printWindow.document.close();
   };
 
   const submitMemberRegistration = (formData) => {
     const newApp = { id: `APP-${Date.now()}`, actionType: 'REGISTER_MEMBER', payload: formData, requestedBy: formData.name, requesterRole: 'Calon Member', date: new Date().toLocaleString() };
-    saveToDatabase({ ...db, approvals: [newApp, ...(db.approvals || [])], logs: createLog(db, 'Persetujuan', `Daftar Member: ${formData.name}`, 'Calon Member') });
-    showToast('Pendaftaran diajukan. Menunggu persetujuan Admin.', 'info');
+    saveToDatabase({ ...db, approvals: [newApp, ...(db.approvals || [])], logs: createLog(db, 'Persetujuan', `Daftar Member: ${formData.name}`, 'Calon Member') }); showToast('Pendaftaran diajukan. Menunggu persetujuan Admin.', 'info');
   };
 
   const redeemPrize = (prize) => {
     if (!loggedInMember) return;
     if (loggedInMember.points >= prize.points) {
-      const updatedMember = { ...loggedInMember, points: loggedInMember.points - prize.points };
-      setLoggedInMember(updatedMember);
+      const updatedMember = { ...loggedInMember, points: loggedInMember.points - prize.points }; setLoggedInMember(updatedMember);
       const newMembers = (db.members||[]).map(m => m.id === updatedMember.id ? updatedMember : m);
-      saveToDatabase({ ...db, members: newMembers, logs: createLog(db, 'Hadiah', `Tukar poin dengan: ${prize.name}`, updatedMember.name) });
-      showToast(`Berhasil menukar poin dengan ${prize.name}!`, 'success');
-    } else {
-      showToast('Poin Anda tidak mencukupi.', 'error');
-    }
+      saveToDatabase({ ...db, members: newMembers, logs: createLog(db, 'Hadiah', `Tukar poin dengan: ${prize.name}`, updatedMember.name) }); showToast(`Berhasil menukar poin dengan ${prize.name}!`, 'success');
+    } else { showToast('Poin Anda tidak mencukupi.', 'error'); }
   };
 
   const value = {
@@ -429,32 +362,38 @@ const AppStateProvider = ({ children }) => {
     removeFromCart: (id) => setCart(cart.filter(i => i.id !== id)),
     updateCartQuantity: (id, d) => setCart(cart.map(i => i.id === id && i.quantity + d > 0 ? { ...i, quantity: i.quantity + d } : i)),
     processOrder, requireApproval, handleApproval, printInvoice,
-    exportData: () => {
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(db));
-      const dl = document.createElement('a'); dl.href = dataStr; dl.download = `aisya_backup_${Date.now()}.json`; dl.click();
-    },
+    exportData: () => { const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(db)); const dl = document.createElement('a'); dl.href = dataStr; dl.download = `aisya_backup_${Date.now()}.json`; dl.click(); },
     importData: (json) => { try { setDb(JSON.parse(json)); showToast('Restore sukses!'); } catch(e) { showToast('Gagal parse JSON', 'error'); } }
   };
 
   return <AppStateContext.Provider value={value}>{toast && <Toast {...toast} onClose={() => setToast(null)} />}{children}</AppStateContext.Provider>;
 };
 
+// ============================================================================
+// SPLASH SCREEN EXCLUSIVE
+// ============================================================================
 const SplashScreen = () => {
+  const { db } = useContext(AppStateContext);
   return (
     <div className="fixed inset-0 bg-stone-900 flex flex-col items-center justify-center z-[9999]">
-      <div className="w-24 h-24 bg-white/10 rounded-full flex items-center justify-center mb-6 animate-pulse">
-        <Package className="w-12 h-12 text-rose-400" />
+      <div className="w-24 h-24 bg-gradient-to-tr from-amber-500 to-amber-700 rounded-full flex items-center justify-center mb-6 shadow-[0_0_40px_rgba(212,175,55,0.4)] animate-pulse">
+        <Package className="w-10 h-10 text-white" />
       </div>
-      <h1 className="text-3xl font-serif font-bold text-white tracking-widest uppercase mb-2 animate-fade-in-down">Aisya Wardrobe</h1>
-      <p className="text-stone-400 text-sm tracking-wide">Membuka Brankas Sinkronisasi...</p>
-      <div className="mt-8 w-48 h-1 bg-stone-800 rounded-full overflow-hidden">
-        <div className="h-full bg-rose-500 w-1/2 animate-[spin_2s_linear_infinite]" style={{ animationName: 'loadingBar', animationDuration: '1.5s', animationIterationCount: 'infinite' }}></div>
+      <h1 style={{ fontFamily: db?.brandConfig?.logoFont || 'Playfair Display' }} className="text-4xl text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-amber-400 to-amber-200 font-bold tracking-widest mb-3 animate-fade-in-down drop-shadow-md">
+        {db?.brandConfig?.appName || 'Aisya Wardrobe'}
+      </h1>
+      <p className="text-stone-400 text-sm tracking-widest uppercase font-light">Mempersiapkan Koleksi...</p>
+      <div className="mt-10 w-56 h-0.5 bg-stone-800 overflow-hidden">
+        <div className="h-full bg-gradient-to-r from-amber-600 to-amber-300 w-1/2 animate-[spin_1.5s_linear_infinite]" style={{ animationName: 'loadingBar', animationDuration: '1.5s', animationIterationCount: 'infinite' }}></div>
       </div>
       <style>{`@keyframes loadingBar { 0% { width: 0%; transform: translateX(-100%); } 100% { width: 100%; transform: translateX(200%); } }`}</style>
     </div>
   );
 };
 
+// ============================================================================
+// LAYOUT CUSTOMER
+// ============================================================================
 const CustomerLayout = ({ children }) => {
   const { view, setView, cart, db, cTheme, loggedInUser, loggedInMember } = useContext(AppStateContext);
   const [showNav, setShowNav] = useState(false);
@@ -467,18 +406,20 @@ const CustomerLayout = ({ children }) => {
         <div className="max-w-6xl mx-auto px-4 py-3 h-16 flex items-center justify-between">
           <button onClick={() => setShowNav(true)} className="md:hidden p-2 text-stone-600"><Menu className="w-6 h-6"/></button>
           
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView('dashboard')}>
-            {db.brandConfig.logoUrl ? <img src={db.brandConfig.logoUrl} className="h-8 object-contain" alt="Logo"/> : 
-             db.brandConfig.appIcon ? <span className="text-3xl">{db.brandConfig.appIcon}</span> : <Package className={`w-8 h-8 ${cTheme.text}`} />}
-            <span className="text-2xl font-serif font-bold text-stone-900 tracking-wide hidden sm:block uppercase">{db.brandConfig.appName}</span>
+          <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setView('dashboard')}>
+            {db.brandConfig.logoUrl ? <img src={db.brandConfig.logoUrl} className="h-9 object-contain group-hover:scale-105 transition-transform" alt="Logo"/> : 
+             db.brandConfig.appIcon ? <span className="text-3xl group-hover:scale-105 transition-transform">{db.brandConfig.appIcon}</span> : <Package className={`w-8 h-8 ${cTheme.text}`} />}
+            <span style={{ fontFamily: db.brandConfig.logoFont || 'Playfair Display' }} className="text-2xl font-bold text-stone-900 tracking-wide hidden sm:block">
+              {db.brandConfig.appName}
+            </span>
           </div>
 
-          <nav className="hidden md:flex gap-6 absolute left-1/2 transform -translate-x-1/2">
+          <nav className="hidden md:flex gap-8 absolute left-1/2 transform -translate-x-1/2">
             <button onClick={() => setView('dashboard')} className={`font-bold transition-colors ${view==='dashboard'?cTheme.text:'text-stone-500 hover:text-stone-900'}`}>Beranda</button>
-            <button onClick={() => setView('catalog')} className={`font-bold transition-colors ${view==='catalog'?cTheme.text:'text-stone-500 hover:text-stone-900'}`}>Katalog</button>
+            <button onClick={() => setView('catalog')} className={`font-bold transition-colors ${view==='catalog'?cTheme.text:'text-stone-500 hover:text-stone-900'}`}>Katalog Eksklusif</button>
           </nav>
 
-          <div className="flex items-center gap-2 relative">
+          <div className="flex items-center gap-3 relative">
             <button onClick={() => loggedInMember ? setView('member_profile') : setView('member_auth')} className={`p-2.5 rounded-full transition-all hover:bg-stone-100 ${loggedInMember ? cTheme.text : 'text-stone-600'}`}>
               {loggedInMember?.photoUrl ? <img src={loggedInMember.photoUrl} className="w-8 h-8 rounded-full object-cover border" alt="Member"/> : <User className="w-6 h-6" />}
             </button>
@@ -495,11 +436,8 @@ const CustomerLayout = ({ children }) => {
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setShowAdminMenu(false)}></div>
                 <div className="absolute top-12 right-0 mt-2 w-48 bg-white rounded-2xl shadow-xl border border-stone-100 z-50 overflow-hidden animate-fade-in-down">
-                  <button onClick={() => { setView('dashboard'); setShowAdminMenu(false); }} className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-bold text-stone-700 hover:bg-stone-50 border-b border-stone-50">
-                    <Home className="w-4 h-4 text-stone-500" /> Beranda
-                  </button>
-                  <button onClick={() => { setView('admin'); setShowAdminMenu(false); }} className={`w-full flex items-center gap-3 px-4 py-3.5 text-sm font-bold transition-colors ${loggedInUser ? `${cTheme.light} ${cTheme.text}` : 'text-stone-700 hover:bg-stone-50'}`}>
-                    <Shield className={`w-4 h-4 ${loggedInUser ? cTheme.text : 'text-stone-500'}`} /> Admin Panel
+                  <button onClick={() => { setView('admin'); setShowAdminMenu(false); }} className={`w-full flex items-center gap-3 px-4 py-4 text-sm font-bold transition-colors ${loggedInUser ? `${cTheme.light} ${cTheme.text}` : 'text-stone-700 hover:bg-stone-50'}`}>
+                    <Shield className={`w-4 h-4 ${loggedInUser ? cTheme.text : 'text-stone-500'}`} /> {loggedInUser ? 'Sistem Admin' : 'Login Staf'}
                   </button>
                 </div>
               </>
@@ -509,41 +447,44 @@ const CustomerLayout = ({ children }) => {
       </header>
 
       {showNav && (
-        <div className="fixed inset-0 z-50 bg-stone-900/50 backdrop-blur-sm md:hidden flex justify-end" onClick={() => setShowNav(false)}>
+        <div className="fixed inset-0 z-50 bg-stone-900/50 backdrop-blur-sm md:hidden flex justify-start" onClick={() => setShowNav(false)}>
           <div className="w-[80vw] max-w-sm bg-white h-full p-6 shadow-2xl animate-fade-in-down" onClick={e=>e.stopPropagation()}>
             <button onClick={() => setShowNav(false)} className="mb-8 p-2 bg-stone-100 rounded-full hover:bg-rose-100 hover:text-rose-600 transition-colors"><X className="w-5 h-5"/></button>
             <div className="space-y-6 flex flex-col">
               <button onClick={() => {setView('dashboard'); setShowNav(false)}} className="flex items-center gap-4 font-bold text-stone-700 text-lg hover:text-rose-600"><Home/> Beranda</button>
-              <button onClick={() => {setView('catalog'); setShowNav(false)}} className="flex items-center gap-4 font-bold text-stone-700 text-lg hover:text-rose-600"><Package/> Katalog</button>
+              <button onClick={() => {setView('catalog'); setShowNav(false)}} className="flex items-center gap-4 font-bold text-stone-700 text-lg hover:text-rose-600"><Package/> Katalog Eksklusif</button>
               <button onClick={() => {loggedInMember ? setView('member_profile') : setView('member_auth'); setShowNav(false)}} className="flex items-center gap-4 font-bold text-stone-700 text-lg hover:text-rose-600"><User/> {loggedInMember ? 'Profil Member' : 'Akun Member'}</button>
               <div className="mt-auto pt-8 border-t border-stone-200">
-                <button onClick={() => {setView('admin'); setShowNav(false)}} className="flex items-center gap-4 font-bold text-stone-500 hover:text-rose-600"><Shield/> Admin System</button>
+                <button onClick={() => {setView('admin'); setShowNav(false)}} className="flex items-center gap-4 font-bold text-stone-500 hover:text-rose-600"><Shield/> Sistem Admin</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      <main className="max-w-6xl mx-auto px-4 py-8">{children}</main>
+      <main className="max-w-6xl mx-auto px-4 py-8 relative">
+         {children}
+         <FloatingWA />
+      </main>
 
-      <footer className="bg-stone-900 text-stone-400 py-12 mt-12 border-t-4 border-rose-600">
+      <footer className="bg-stone-900 text-stone-400 py-12 mt-12 border-t-4 border-amber-600">
         <div className="max-w-6xl mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-10">
           <div>
             <div className="flex items-center gap-3 mb-6 cursor-pointer" onClick={() => setView('dashboard')}>
-               {db.brandConfig.logoUrl ? <img src={db.brandConfig.logoUrl} alt="Logo" className="h-8 object-contain brightness-0 invert" /> : <Package className={`w-8 h-8 text-rose-500`} />}
-               <span className="text-2xl font-serif font-bold text-white tracking-wider uppercase">{db.brandConfig.appName}</span>
+               {db.brandConfig.logoUrl ? <img src={db.brandConfig.logoUrl} alt="Logo" className="h-8 object-contain brightness-0 invert" /> : <Package className={`w-8 h-8 text-amber-500`} />}
+               <span style={{ fontFamily: db.brandConfig.logoFont || 'Playfair Display' }} className="text-2xl font-bold text-white tracking-wider">{db.brandConfig.appName}</span>
             </div>
             <p className="text-sm leading-relaxed pr-4 font-light text-stone-400">{db.brandConfig.companyBio}</p>
           </div>
           <div>
-            <h4 className="text-white font-serif tracking-wide text-lg mb-6">Layanan Kami</h4>
+            <h4 className="text-white font-serif tracking-wide text-lg mb-6">Layanan Cepat</h4>
             <ul className="space-y-3 text-sm">
-              <li><button onClick={() => setView('catalog')} className="hover:text-rose-400 transition-colors flex items-center gap-2"><ChevronRight className="w-3 h-3"/> Katalog Pakaian</button></li>
-              <li><button onClick={() => setView('member_auth')} className="hover:text-rose-400 transition-colors flex items-center gap-2"><ChevronRight className="w-3 h-3"/> Pendaftaran Member</button></li>
+              <li><button onClick={() => setView('catalog')} className="hover:text-amber-400 transition-colors flex items-center gap-2"><ChevronRight className="w-3 h-3"/> Katalog Pakaian</button></li>
+              <li><button onClick={() => setView('member_auth')} className="hover:text-amber-400 transition-colors flex items-center gap-2"><ChevronRight className="w-3 h-3"/> Keuntungan Member</button></li>
             </ul>
           </div>
           <div>
-            <h4 className="text-white font-serif tracking-wide text-lg mb-6">Hubungi Kami</h4>
+            <h4 className="text-white font-serif tracking-wide text-lg mb-6">Pusat Bantuan</h4>
             <ul className="space-y-4 text-sm text-stone-400">
               <li className="flex items-center gap-3"><div className="w-8 h-8 rounded-full bg-stone-800 flex items-center justify-center text-stone-300"><FileText className="w-4 h-4"/></div> {db.brandConfig.companyEmail}</li>
               {(db.brandConfig.socialMedia || []).map((soc, idx) => (
@@ -559,7 +500,6 @@ const CustomerLayout = ({ children }) => {
         </div>
         <div className="max-w-6xl mx-auto px-4 mt-12 pt-8 border-t border-stone-800 flex flex-col md:flex-row justify-between items-center gap-4 text-xs">
           <p>&copy; {new Date().getFullYear()} {db.brandConfig.appName}. Hak Cipta Dilindungi.</p>
-          <div className="flex gap-6"><span className="cursor-pointer hover:text-white">Syarat & Ketentuan</span><span className="cursor-pointer hover:text-white">Kebijakan Privasi</span></div>
         </div>
       </footer>
     </div>
@@ -567,7 +507,7 @@ const CustomerLayout = ({ children }) => {
 };
 
 // ============================================================================
-// KOMPONEN PRODUCT CARD GLOBAL (UNTUK DIPAKAI DI DASHBOARD & KATALOG)
+// KOMPONEN CARD PRODUK
 // ============================================================================
 const ProductCardItem = ({ product, openDetail }) => {
   const { cart, addToCart, getAvailableStock, cTheme, loggedInMember, toggleWishlist } = useContext(AppStateContext);
@@ -588,7 +528,7 @@ const ProductCardItem = ({ product, openDetail }) => {
         {product.images?.length > 1 ? (
           <div className="flex overflow-x-auto snap-x snap-mandatory h-full w-full no-scrollbar" onClick={e => e.stopPropagation()}>
             {product.images.map((img, idx) => (
-              <img key={idx} src={img} alt={`${product.name} - Gambar ${idx + 1}`} className="w-full h-full object-cover shrink-0 snap-center lg:group-hover:scale-110 transition-transform duration-700" />
+              <img key={idx} src={img} alt={`${product.name}`} className="w-full h-full object-cover shrink-0 snap-center lg:group-hover:scale-110 transition-transform duration-700" />
             ))}
           </div>
         ) : (
@@ -605,7 +545,7 @@ const ProductCardItem = ({ product, openDetail }) => {
       
       <div className="p-6 flex flex-col flex-grow">
         <div className="flex justify-between items-start mb-1">
-           <h3 className="font-serif font-bold text-xl text-stone-900 leading-tight group-hover:text-rose-600 transition-colors pr-2">{product.name}</h3>
+           <h3 className="font-serif font-bold text-xl text-stone-900 leading-tight group-hover:text-amber-600 transition-colors pr-2">{product.name}</h3>
         </div>
         
         <p className="text-[10px] text-stone-400 font-mono bg-stone-50 px-2 py-1 rounded w-max mb-4">{product.id}</p>
@@ -618,15 +558,10 @@ const ProductCardItem = ({ product, openDetail }) => {
           ) : (
             <p className={`${cTheme.text} font-bold text-xl`}>{formatRupiah(effPrice)} <span className="text-sm font-light text-stone-500">/ hari</span></p>
           )}
-          
           {product.deposit > 0 && <p className="text-xs font-bold text-amber-600 bg-amber-50 inline-block px-2 py-1 rounded mt-2">+ Deposit: {formatRupiah(product.deposit)}</p>}
         </div>
         
-        <div className="flex flex-col flex-grow">
-           <p className={`text-sm text-stone-500 font-light flex-grow mb-6 line-clamp-2`}>
-             {product.desc}
-           </p>
-        </div>
+        <div className="flex flex-col flex-grow"><p className={`text-sm text-stone-500 font-light flex-grow mb-6 line-clamp-2`}>{product.desc}</p></div>
 
         <div className="mt-auto pt-5 border-t border-stone-100 flex items-center justify-between">
           <span className="text-sm text-stone-500 font-medium">Sisa: {avail}</span>
@@ -637,39 +572,27 @@ const ProductCardItem = ({ product, openDetail }) => {
   );
 };
 
+
+// ============================================================================
+// VIEWS (DASHBOARD, CATALOG, DLL)
+// ============================================================================
 const DashboardView = () => {
   const { setView, db, cTheme } = useContext(AppStateContext);
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [currentImgIdx, setCurrentImgIdx] = useState(0);
 
-  // Ambil Promo & Best Seller untuk ditampilkan di Beranda
-  const promoProducts = useMemo(() => {
-    return (db.products||[]).filter(p => p.discountPrice > 0 && p.status !== 'Maintenance').slice(0, 4);
-  }, [db.products]);
-
+  const promoProducts = useMemo(() => { return (db.products||[]).filter(p => p.discountPrice > 0 && p.status !== 'Maintenance').slice(0, 4); }, [db.products]);
   const bestSellerIds = useMemo(() => {
     const counts = {};
-    (db.orders||[]).filter(o => o.status === 'Selesai').forEach(o => {
-      o.items.forEach(i => { counts[i.id] = (counts[i.id] || 0) + i.quantity; });
-    });
+    (db.orders||[]).filter(o => o.status === 'Selesai').forEach(o => { o.items.forEach(i => { counts[i.id] = (counts[i.id] || 0) + i.quantity; }); });
     return Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(e=>e[0]);
   }, [db.orders]);
 
-  const bestSellers = useMemo(() => {
-     return (db.products||[]).filter(p => bestSellerIds.includes(p.id) && p.status !== 'Maintenance').sort((a,b) => bestSellerIds.indexOf(a.id) - bestSellerIds.indexOf(b.id)).slice(0, 4);
-  }, [db.products, bestSellerIds]);
-  
-  // Jika tidak ada best seller (misal toko baru), tampilkan produk terbaru
-  const latestProducts = useMemo(() => {
-     return (db.products||[]).filter(p => p.status !== 'Maintenance').slice(-4).reverse();
-  }, [db.products]);
-
+  const bestSellers = useMemo(() => { return (db.products||[]).filter(p => bestSellerIds.includes(p.id) && p.status !== 'Maintenance').sort((a,b) => bestSellerIds.indexOf(a.id) - bestSellerIds.indexOf(b.id)).slice(0, 4); }, [db.products, bestSellerIds]);
+  const latestProducts = useMemo(() => { return (db.products||[]).filter(p => p.status !== 'Maintenance').slice(-4).reverse(); }, [db.products]);
   const displayProducts = bestSellers.length > 0 ? bestSellers : latestProducts;
 
-  const openDetail = (product) => {
-      setSelectedDetail(product);
-      setCurrentImgIdx(0);
-  };
+  const openDetail = (product) => { setSelectedDetail(product); setCurrentImgIdx(0); };
   const closeDetail = () => setSelectedDetail(null);
 
   const renderDetailModal = () => {
@@ -677,7 +600,6 @@ const DashboardView = () => {
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-stone-900/70 backdrop-blur-sm" onClick={closeDetail}>
            <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row shadow-2xl relative animate-fade-in-down" onClick={e => e.stopPropagation()}>
-              
               <div className="w-full md:w-1/2 h-64 md:h-auto bg-stone-100 relative group flex-shrink-0">
                  <img src={selectedDetail.images?.[currentImgIdx] || 'https://placehold.co/400?text=No+Image'} className="w-full h-full object-cover" alt={selectedDetail.name} />
                  {selectedDetail.images?.length > 1 && (
@@ -685,9 +607,7 @@ const DashboardView = () => {
                       <button onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(prev => prev === 0 ? selectedDetail.images.length - 1 : prev - 1); }} className="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-white/70 hover:bg-white rounded-full text-stone-800 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"><ChevronLeft className="w-5 h-5"/></button>
                       <button onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(prev => prev === selectedDetail.images.length - 1 ? 0 : prev + 1); }} className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-white/70 hover:bg-white rounded-full text-stone-800 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"><ChevronRight className="w-5 h-5"/></button>
                       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 bg-stone-900/30 px-3 py-1.5 rounded-full backdrop-blur-sm">
-                         {selectedDetail.images.map((_, idx) => (
-                            <button key={idx} onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(idx); }} className={`w-2 h-2 rounded-full transition-all ${idx === currentImgIdx ? 'bg-white w-4' : 'bg-white/50 hover:bg-white/80'}`} />
-                         ))}
+                         {selectedDetail.images.map((_, idx) => <button key={idx} onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(idx); }} className={`w-2 h-2 rounded-full transition-all ${idx === currentImgIdx ? 'bg-white w-4' : 'bg-white/50 hover:bg-white/80'}`} /> )}
                       </div>
                     </>
                  )}
@@ -709,22 +629,13 @@ const DashboardView = () => {
                           <p className="text-sm text-stone-400 line-through mb-1">Normal: {formatRupiah(selectedDetail.price)}</p>
                           <p className="text-red-600 font-bold text-3xl mb-2">{formatRupiah(selectedDetail.discountPrice)} <span className="text-sm font-light text-stone-500">/ hari</span></p>
                         </>
-                      ) : (
-                         <p className={`${cTheme.text} font-bold text-3xl mb-2`}>{formatRupiah(selectedDetail.price)} <span className="text-sm font-light text-stone-500">/ hari</span></p>
-                      )}
-                      
+                      ) : (<p className={`${cTheme.text} font-bold text-3xl mb-2`}>{formatRupiah(selectedDetail.price)} <span className="text-sm font-light text-stone-500">/ hari</span></p>)}
                       {selectedDetail.deposit > 0 && <p className="text-xs font-bold text-amber-600 bg-amber-100/50 inline-block px-3 py-1.5 rounded-lg border border-amber-200">+ Deposit Jaminan: {formatRupiah(selectedDetail.deposit)}</p>}
                   </div>
 
-                  <div className="mb-8">
-                      <h4 className="text-sm font-bold text-stone-800 uppercase tracking-wider mb-3 border-b border-stone-100 pb-2">Deskripsi Pakaian</h4>
-                      <p className="text-base text-stone-600 leading-relaxed font-light whitespace-pre-line">{selectedDetail.desc}</p>
-                  </div>
-
+                  <div className="mb-8"><h4 className="text-sm font-bold text-stone-800 uppercase tracking-wider mb-3 border-b border-stone-100 pb-2">Deskripsi Pakaian</h4><p className="text-base text-stone-600 leading-relaxed font-light whitespace-pre-line">{selectedDetail.desc}</p></div>
                   <div className="mt-auto pt-6 border-t border-stone-100 space-y-4">
-                      <button onClick={() => { closeDetail(); setView('catalog'); }} className="w-full bg-stone-900 hover:bg-black text-white text-lg font-bold py-4 rounded-xl transition-colors shadow-lg flex justify-center items-center">
-                        Lihat Lebih Detail di Katalog
-                      </button>
+                      <button onClick={() => { closeDetail(); setView('catalog'); }} className="w-full bg-stone-900 hover:bg-black text-white text-lg font-bold py-4 rounded-xl transition-colors shadow-lg flex justify-center items-center">Lihat Lebih Detail di Katalog</button>
                   </div>
               </div>
            </div>
@@ -737,50 +648,36 @@ const DashboardView = () => {
       <div className={`relative ${cTheme.bg} rounded-[2.5rem] overflow-hidden shadow-2xl min-h-[400px] flex items-center`}>
         <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1490481651871-ab68de25d43d?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-20 mix-blend-overlay"></div>
         <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/30 to-transparent"></div>
-        
         <div className="relative z-10 px-8 md:px-16 py-12 max-w-3xl">
           <span className="inline-block py-1 px-3 rounded-full bg-white/20 backdrop-blur-md border border-white/30 text-white text-xs font-bold uppercase tracking-widest mb-6">Pusat Sewa Pakaian Eksklusif</span>
-          <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif font-bold mb-6 leading-tight text-white drop-shadow-lg">
+          <h1 style={{ fontFamily: db.brandConfig.logoFont || 'Playfair Display' }} className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6 leading-tight text-white drop-shadow-lg">
             {db.brandConfig.appName}
           </h1>
-          <p className="text-lg md:text-xl text-stone-200 mb-10 font-light max-w-xl leading-relaxed">
-            {db.brandConfig.slogan}
-          </p>
-          <div className="flex flex-wrap gap-4">
-             <button onClick={() => setView('catalog')} className="bg-white text-stone-900 px-8 py-4 rounded-full font-bold hover:scale-105 transition-transform shadow-xl flex items-center gap-2">Jelajahi Katalog <ChevronRight className="w-5 h-5"/></button>
-          </div>
+          <p className="text-lg md:text-xl text-stone-200 mb-10 font-light max-w-xl leading-relaxed">{db.brandConfig.slogan}</p>
+          <div className="flex flex-wrap gap-4"><button onClick={() => setView('catalog')} className="bg-white text-stone-900 px-8 py-4 rounded-full font-bold hover:scale-105 transition-transform shadow-xl flex items-center gap-2">Jelajahi Katalog <ChevronRight className="w-5 h-5"/></button></div>
         </div>
       </div>
 
       {promoProducts.length > 0 && (
         <div className="relative">
            <div className="flex justify-between items-end mb-8">
-              <div>
-                <h2 className="text-3xl font-serif font-bold text-stone-900 flex items-center gap-3"><Tag className="w-8 h-8 text-red-600"/> Penawaran Spesial</h2>
-                <p className="text-stone-500 mt-2">Dapatkan gaun dan setelan impianmu dengan harga khusus.</p>
-              </div>
+              <div><h2 className="text-3xl font-serif font-bold text-stone-900 flex items-center gap-3"><Tag className="w-8 h-8 text-red-600"/> Penawaran Spesial</h2><p className="text-stone-500 mt-2">Dapatkan gaun dan setelan impianmu dengan harga khusus.</p></div>
               <button onClick={() => setView('catalog')} className="hidden sm:flex text-rose-600 font-bold items-center hover:text-rose-800 transition-colors">Lihat Semua <ChevronRight className="w-4 h-4 ml-1"/></button>
            </div>
-           
-           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {promoProducts.map(p => <ProductCardItem key={p.id} product={p} openDetail={openDetail} />)}
-           </div>
+           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">{promoProducts.map(p => <ProductCardItem key={p.id} product={p} openDetail={openDetail} />)}</div>
            <button onClick={() => setView('catalog')} className="w-full mt-6 sm:hidden border-2 border-stone-200 text-stone-700 font-bold py-3 rounded-xl hover:bg-stone-50">Lihat Semua Promo</button>
         </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center group hover:-translate-y-1 transition-transform">
-          <div className={`${cTheme.light} p-4 rounded-2xl mb-5`}><Package className="w-8 h-8"/></div>
-          <h3 className="font-bold text-stone-800 text-lg mb-2">Kualitas Terjamin</h3><p className="text-sm text-stone-500 leading-relaxed">Koleksi terawat, wangi, dan disetrika rapi sebelum sampai ke tangan Anda.</p>
+          <div className={`${cTheme.light} p-4 rounded-2xl mb-5`}><Package className="w-8 h-8"/></div><h3 className="font-bold text-stone-800 text-lg mb-2">Kualitas Terjamin</h3><p className="text-sm text-stone-500 leading-relaxed">Koleksi terawat, wangi, dan disetrika rapi sebelum sampai ke tangan Anda.</p>
         </div>
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center group hover:-translate-y-1 transition-transform">
-          <div className={`${cTheme.light} p-4 rounded-2xl mb-5`}><Shield className="w-8 h-8"/></div>
-          <h3 className="font-bold text-stone-800 text-lg mb-2">Transaksi Aman</h3><p className="text-sm text-stone-500 leading-relaxed">Sistem deposit transparan yang akan dikembalikan penuh setelah sewa.</p>
+          <div className={`${cTheme.light} p-4 rounded-2xl mb-5`}><Shield className="w-8 h-8"/></div><h3 className="font-bold text-stone-800 text-lg mb-2">Transaksi Aman</h3><p className="text-sm text-stone-500 leading-relaxed">Sistem deposit transparan yang akan dikembalikan penuh setelah sewa.</p>
         </div>
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100 flex flex-col items-center text-center group hover:-translate-y-1 transition-transform">
-          <div className={`${cTheme.light} p-4 rounded-2xl mb-5`}><Award className="w-8 h-8"/></div>
-          <h3 className="font-bold text-stone-800 text-lg mb-2">Member Reward</h3><p className="text-sm text-stone-500 leading-relaxed">Kumpulkan poin di setiap transaksi dan tukarkan dengan hadiah eksklusif.</p>
+          <div className={`${cTheme.light} p-4 rounded-2xl mb-5`}><Award className="w-8 h-8"/></div><h3 className="font-bold text-stone-800 text-lg mb-2">Member Reward</h3><p className="text-sm text-stone-500 leading-relaxed">Kumpulkan poin di setiap transaksi dan tukarkan dengan hadiah eksklusif.</p>
         </div>
       </div>
 
@@ -788,23 +685,16 @@ const DashboardView = () => {
         <div>
            <div className="flex justify-between items-end mb-8">
               <div>
-                <h2 className="text-3xl font-serif font-bold text-stone-900 flex items-center gap-3">
-                  {bestSellers.length > 0 ? <><Star className="w-8 h-8 text-yellow-500 fill-yellow-500"/> Paling Diminati</> : <><Sparkles className="w-8 h-8 text-rose-500"/> Koleksi Terbaru</>}
-                </h2>
+                <h2 className="text-3xl font-serif font-bold text-stone-900 flex items-center gap-3">{bestSellers.length > 0 ? <><Star className="w-8 h-8 text-yellow-500 fill-yellow-500"/> Paling Diminati</> : <><Sparkles className="w-8 h-8 text-amber-500"/> Koleksi Terbaru</>}</h2>
                 <p className="text-stone-500 mt-2">Pilihan favorit para pelanggan untuk tampil memukau.</p>
               </div>
               <button onClick={() => setView('catalog')} className="hidden sm:flex text-rose-600 font-bold items-center hover:text-rose-800 transition-colors">Katalog Lengkap <ChevronRight className="w-4 h-4 ml-1"/></button>
            </div>
-           
-           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {displayProducts.map(p => <ProductCardItem key={p.id} product={p} openDetail={openDetail} />)}
-           </div>
+           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">{displayProducts.map(p => <ProductCardItem key={p.id} product={p} openDetail={openDetail} />)}</div>
            <button onClick={() => setView('catalog')} className="w-full mt-6 sm:hidden border-2 border-stone-200 text-stone-700 font-bold py-3 rounded-xl hover:bg-stone-50">Lihat Semua Koleksi</button>
         </div>
       )}
-
       {renderDetailModal()}
-
     </div>
   );
 };
@@ -816,17 +706,9 @@ const CatalogView = () => {
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [currentImgIdx, setCurrentImgIdx] = useState(0);
 
-  const filteredProducts = (db.products||[]).filter(p => 
-    p.status !== 'Maintenance' && 
-    (activeCategory === 'Semua' || p.category === activeCategory) &&
-    (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const filteredProducts = (db.products||[]).filter(p => p.status !== 'Maintenance' && (activeCategory === 'Semua' || p.category === activeCategory) && (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase())));
 
-  const openDetail = (product) => {
-    setSelectedDetail(product);
-    setCurrentImgIdx(0);
-  };
-  
+  const openDetail = (product) => { setSelectedDetail(product); setCurrentImgIdx(0); };
   const closeDetail = () => setSelectedDetail(null);
 
   const renderDetailModal = () => {
@@ -837,7 +719,6 @@ const CatalogView = () => {
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-stone-900/70 backdrop-blur-sm" onClick={closeDetail}>
            <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row shadow-2xl relative animate-fade-in-down" onClick={e => e.stopPropagation()}>
-              
               <div className="w-full md:w-1/2 h-64 md:h-auto bg-stone-100 relative group flex-shrink-0">
                  <img src={selectedDetail.images?.[currentImgIdx] || 'https://placehold.co/400?text=No+Image'} className="w-full h-full object-cover" alt={selectedDetail.name} />
                  {selectedDetail.images?.length > 1 && (
@@ -845,9 +726,7 @@ const CatalogView = () => {
                       <button onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(prev => prev === 0 ? selectedDetail.images.length - 1 : prev - 1); }} className="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-white/70 hover:bg-white rounded-full text-stone-800 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"><ChevronLeft className="w-5 h-5"/></button>
                       <button onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(prev => prev === selectedDetail.images.length - 1 ? 0 : prev + 1); }} className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-white/70 hover:bg-white rounded-full text-stone-800 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"><ChevronRight className="w-5 h-5"/></button>
                       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 bg-stone-900/30 px-3 py-1.5 rounded-full backdrop-blur-sm">
-                         {selectedDetail.images.map((_, idx) => (
-                            <button key={idx} onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(idx); }} className={`w-2 h-2 rounded-full transition-all ${idx === currentImgIdx ? 'bg-white w-4' : 'bg-white/50 hover:bg-white/80'}`} />
-                         ))}
+                         {selectedDetail.images.map((_, idx) => <button key={idx} onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(idx); }} className={`w-2 h-2 rounded-full transition-all ${idx === currentImgIdx ? 'bg-white w-4' : 'bg-white/50 hover:bg-white/80'}`} /> )}
                       </div>
                     </>
                  )}
@@ -855,54 +734,31 @@ const CatalogView = () => {
               </div>
 
               <div className="w-full md:w-1/2 p-6 md:p-10 flex flex-col overflow-y-auto no-scrollbar">
-                  <div className="flex justify-between items-start mb-2">
-                      <span className="bg-stone-100 text-stone-600 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider mb-3 inline-block">{selectedDetail.category}</span>
-                      <button onClick={closeDetail} className="hidden md:block p-2 bg-stone-50 hover:bg-stone-100 rounded-full text-stone-500 transition-colors"><X className="w-5 h-5"/></button>
-                  </div>
+                  <div className="flex justify-between items-start mb-2"><span className="bg-stone-100 text-stone-600 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider mb-3 inline-block">{selectedDetail.category}</span><button onClick={closeDetail} className="hidden md:block p-2 bg-stone-50 hover:bg-stone-100 rounded-full text-stone-500 transition-colors"><X className="w-5 h-5"/></button></div>
                   <h2 className="text-3xl font-serif font-bold text-stone-900 leading-tight mb-1">{selectedDetail.name}</h2>
                   <p className="text-sm font-mono text-stone-400 mb-6">{selectedDetail.id}</p>
                   
                   <div className="mb-8 bg-stone-50 p-5 rounded-2xl border border-stone-100 relative">
                       {hasDiscount && <span className="absolute -top-3 -right-3 bg-red-600 text-white font-bold px-4 py-1.5 rounded-full shadow-lg transform rotate-12">SALE</span>}
                       {hasDiscount ? (
-                        <>
-                          <p className="text-sm text-stone-400 line-through mb-1">Normal: {formatRupiah(selectedDetail.price)}</p>
-                          <p className="text-red-600 font-bold text-3xl mb-2">{formatRupiah(selectedDetail.discountPrice)} <span className="text-sm font-light text-stone-500">/ hari</span></p>
-                        </>
-                      ) : (
-                         <p className={`${cTheme.text} font-bold text-3xl mb-2`}>{formatRupiah(selectedDetail.price)} <span className="text-sm font-light text-stone-500">/ hari</span></p>
-                      )}
-                      
+                        <><p className="text-sm text-stone-400 line-through mb-1">Normal: {formatRupiah(selectedDetail.price)}</p><p className="text-red-600 font-bold text-3xl mb-2">{formatRupiah(selectedDetail.discountPrice)} <span className="text-sm font-light text-stone-500">/ hari</span></p></>
+                      ) : (<p className={`${cTheme.text} font-bold text-3xl mb-2`}>{formatRupiah(selectedDetail.price)} <span className="text-sm font-light text-stone-500">/ hari</span></p>)}
                       {selectedDetail.deposit > 0 && <p className="text-xs font-bold text-amber-600 bg-amber-100/50 inline-block px-3 py-1.5 rounded-lg border border-amber-200">+ Deposit Jaminan: {formatRupiah(selectedDetail.deposit)}</p>}
                   </div>
 
-                  <div className="mb-8">
-                      <h4 className="text-sm font-bold text-stone-800 uppercase tracking-wider mb-3 border-b border-stone-100 pb-2">Deskripsi Pakaian</h4>
-                      <p className="text-base text-stone-600 leading-relaxed font-light whitespace-pre-line">{selectedDetail.desc}</p>
-                  </div>
-
-                  {selectedDetail.productLink && (
-                      <a href={selectedDetail.productLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-2 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-5 py-3 rounded-xl mb-8 w-full transition-colors">
-                          <ExternalLink className="w-4 h-4"/> Lihat Referensi Eksternal / Video
-                      </a>
-                  )}
+                  <div className="mb-8"><h4 className="text-sm font-bold text-stone-800 uppercase tracking-wider mb-3 border-b border-stone-100 pb-2">Deskripsi Pakaian</h4><p className="text-base text-stone-600 leading-relaxed font-light whitespace-pre-line">{selectedDetail.desc}</p></div>
+                  {selectedDetail.productLink && (<a href={selectedDetail.productLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-2 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-5 py-3 rounded-xl mb-8 w-full transition-colors"><ExternalLink className="w-4 h-4"/> Lihat Referensi Eksternal / Video</a>)}
 
                   <div className="mt-auto pt-6 border-t border-stone-100 space-y-4">
                       <div className="flex items-center justify-between mb-2">
                           <span className="text-stone-500 font-medium">Stok Tersedia Saat Ini:</span>
-                          <span className={`font-bold px-4 py-1.5 rounded-lg text-sm ${getAvailableStock(selectedDetail.id) > 0 ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-                              {getAvailableStock(selectedDetail.id)} dari {selectedDetail.totalStock} Pcs
-                          </span>
+                          <span className={`font-bold px-4 py-1.5 rounded-lg text-sm ${getAvailableStock(selectedDetail.id) > 0 ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>{getAvailableStock(selectedDetail.id)} dari {selectedDetail.totalStock} Pcs</span>
                       </div>
                       <div className="flex gap-3">
                           <button onClick={(e) => { e.stopPropagation(); toggleWishlist(selectedDetail.id); }} className={`p-4 rounded-xl border border-stone-200 flex items-center justify-center transition-colors ${loggedInMember?.wishlist?.includes(selectedDetail.id) ? 'bg-rose-50 border-rose-200' : 'hover:bg-stone-50'}`}>
                               <Heart className={`w-6 h-6 ${loggedInMember?.wishlist?.includes(selectedDetail.id) ? 'fill-rose-500 text-rose-500' : 'text-stone-400'}`} />
                           </button>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); addToCart(selectedDetail); closeDetail(); }} 
-                            disabled={getAvailableStock(selectedDetail.id) <= (cart.find(i => i.id === selectedDetail.id)?.quantity || 0)} 
-                            className={`flex-1 py-4 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 text-lg shadow-lg ${getAvailableStock(selectedDetail.id) > (cart.find(i => i.id === selectedDetail.id)?.quantity || 0) ? `${cTheme.bg} text-white hover:brightness-110` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}
-                          >
+                          <button onClick={(e) => { e.stopPropagation(); addToCart(selectedDetail); closeDetail(); }} disabled={getAvailableStock(selectedDetail.id) <= (cart.find(i => i.id === selectedDetail.id)?.quantity || 0)} className={`flex-1 py-4 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 text-lg shadow-lg ${getAvailableStock(selectedDetail.id) > (cart.find(i => i.id === selectedDetail.id)?.quantity || 0) ? `${cTheme.bg} text-white hover:brightness-110` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}>
                               <ShoppingCart className="w-5 h-5" /> Sewa Sekarang
                           </button>
                       </div>
@@ -937,9 +793,7 @@ const CatalogView = () => {
 
         {filteredProducts.length === 0 ? (
             <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-stone-200">
-                <Package className="w-16 h-16 mx-auto mb-4 text-stone-300"/>
-                <h3 className="text-xl font-bold text-stone-800 mb-2">Katalog Kosong</h3>
-                <p className="text-stone-500">Saat ini belum ada produk yang cocok dengan pencarianmu.</p>
+                <Package className="w-16 h-16 mx-auto mb-4 text-stone-300"/><h3 className="text-xl font-bold text-stone-800 mb-2">Katalog Kosong</h3><p className="text-stone-500">Saat ini belum ada produk yang cocok dengan pencarianmu.</p>
             </div>
         ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -959,8 +813,7 @@ const CartView = () => {
 
   if (cart.length === 0) return (
     <div className="bg-white rounded-3xl shadow-sm border border-stone-100 p-16 text-center max-w-2xl mx-auto mt-10">
-      <ShoppingCart className="w-20 h-20 text-stone-200 mx-auto mb-6" />
-      <h2 className="text-2xl font-serif font-bold text-stone-800 mb-4">Keranjang Kosong</h2>
+      <ShoppingCart className="w-20 h-20 text-stone-200 mx-auto mb-6" /><h2 className="text-2xl font-serif font-bold text-stone-800 mb-4">Keranjang Kosong</h2>
       <button onClick={() => setView('catalog')} className={`px-10 py-4 rounded-full font-bold shadow-lg transition-all ${cTheme.bg} text-white`}>Eksplorasi Katalog</button>
     </div>
   );
@@ -1030,23 +883,14 @@ const CheckoutView = () => {
   const totalBiaya = subtotalSewa + totalDeposit;
 
   const handleKtpUpload = async (e) => { 
-    const file = e.target.files[0]; 
-    if (!file) return;
-    setIsUploading(true);
-    const compressed = await compressImage(file);
-    const url = await uploadImageToServer(compressed);
-    if(url) {
-      setFormData(p => ({...p, ktpUrl: url})); 
-    } else {
-      showToast("Gagal upload KTP ke server gambar.", "error");
-    }
+    const file = e.target.files[0]; if (!file) return; setIsUploading(true);
+    const compressed = await compressImage(file); const url = await uploadImageToServer(compressed);
+    if(url) { setFormData(p => ({...p, ktpUrl: url})); } else { showToast("Gagal upload KTP ke server gambar.", "error"); }
     setIsUploading(false);
   };
   
   const handleWASubmit = () => {
-    if(!formData.name || !formData.phone || !formData.identity || !formData.address || !formData.startDate || !formData.endDate) {
-      showToast("Harap isi semua formulir yang wajib (*)", "error"); return;
-    }
+    if(!formData.name || !formData.phone || !formData.identity || !formData.address || !formData.startDate || !formData.endDate) { showToast("Harap isi semua formulir yang wajib (*)", "error"); return; }
     if(new Date(formData.endDate) < new Date(formData.startDate)) { showToast("Tanggal akhir tidak valid!", "error"); return; }
     processOrder({...formData, duration}, true); 
   };
@@ -1092,10 +936,7 @@ const CheckoutView = () => {
             <div className="space-y-4 mb-8">
               <div className="flex justify-between text-stone-400 text-sm"><span>Sewa ({duration} Hari)</span><span className="font-bold text-white">{formatRupiah(subtotalSewa)}</span></div>
               <div className="flex justify-between text-amber-500 text-sm border-b border-stone-700 pb-4"><span>Deposit Jaminan</span><span className="font-bold">{formatRupiah(totalDeposit)}</span></div>
-              <div className="flex justify-between items-end pt-2">
-                <span className="font-bold text-stone-300">Total Biaya</span>
-                <span className={`font-bold text-2xl ${cTheme.text}`}>{formatRupiah(totalBiaya)}</span>
-              </div>
+              <div className="flex justify-between items-end pt-2"><span className="font-bold text-stone-300">Total Biaya</span><span className={`font-bold text-2xl ${cTheme.text}`}>{formatRupiah(totalBiaya)}</span></div>
             </div>
 
             {loggedInMember ? (
@@ -1104,9 +945,7 @@ const CheckoutView = () => {
               <button form="co-form" type="submit" className={`w-full ${cTheme.bg} text-white py-4 rounded-xl font-bold text-lg hover:brightness-110 shadow-lg active:scale-95 mb-3`}>Kirim Pesanan</button>
             )}
             
-            <div className="text-center text-xs text-stone-500 mt-4">
-               *Uang Deposit akan dikembalikan penuh jika barang kembali tanpa cacat/telat.
-            </div>
+            <div className="text-center text-xs text-stone-500 mt-4">*Uang Deposit akan dikembalikan penuh jika barang kembali tanpa cacat/telat.</div>
           </div>
         </div>
       </div>
@@ -1144,15 +983,9 @@ const MemberAuthView = () => {
       try {
         const compressed = await compressImage(file);
         const serverUrl = await uploadImageToServer(compressed);
-        if (serverUrl) {
-          setFormData(prev => ({ ...prev, [type]: serverUrl }));
-          showToast(`Gambar OK`, 'success');
-        } else {
-          showToast(`Gagal mengunggah gambar ke server`, 'error');
-        }
-      } catch (error) { 
-        showToast(`Gagal mengunggah gambar`, 'error'); 
-      } 
+        if (serverUrl) { setFormData(prev => ({ ...prev, [type]: serverUrl })); showToast(`Gambar OK`, 'success'); } 
+        else { showToast(`Gagal mengunggah gambar ke server`, 'error'); }
+      } catch (error) { showToast(`Gagal mengunggah gambar`, 'error'); } 
       finally { setIsUploading(prev => ({ ...prev, [type]: false })); }
     }
   };
@@ -1231,7 +1064,7 @@ const MemberProfileView = () => {
                   {myWishlist.map(p => (
                     <div key={p.id} className="bg-white border border-stone-100 rounded-2xl p-4 shadow-sm relative">
                       {p.discountPrice > 0 && <span className="absolute top-2 right-2 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded">SALE</span>}
-                      <img src={p.images?.[0] || 'https://placehold.co/400?text=No+Image'} className="w-full h-40 object-cover rounded-xl mb-4 bg-stone-100" />
+                      <img src={p.images?.[0] || 'https://placehold.co/400?text=No+Image'} className="w-full h-40 object-cover rounded-xl mb-4 bg-stone-100" alt="img"/>
                       <h4 className="font-bold text-stone-800">{p.name}</h4>
                       <p className={`${cTheme.text} font-bold mt-1 mb-4`}>{formatRupiah(p.discountPrice > 0 ? p.discountPrice : p.price)}</p>
                       <button onClick={() => addToCart(p)} className={`w-full py-2.5 rounded-xl font-bold text-white ${cTheme.bg}`}>Sewa Sekarang</button>
@@ -1269,7 +1102,7 @@ const MemberProfileView = () => {
                 const canRedeem = loggedInMember.points >= p.points;
                 return (
                   <div key={p.id} className="border border-stone-200 rounded-2xl overflow-hidden bg-white shadow-sm flex flex-col">
-                    <div className="h-40 bg-stone-100"><img src={p.image} className="w-full h-full object-cover" /></div>
+                    <div className="h-40 bg-stone-100"><img src={p.image} className="w-full h-full object-cover" alt="prize"/></div>
                     <div className="p-5 flex flex-col flex-grow">
                       <h4 className="font-bold text-stone-800 text-lg mb-2">{p.name}</h4>
                       <p className="text-sm text-stone-500 mb-6 flex-grow">{p.desc}</p>
@@ -1347,7 +1180,7 @@ const AdminLayout = () => {
       <aside className={`fixed lg:static inset-y-0 right-0 z-50 w-[80vw] max-w-sm lg:w-72 bg-stone-900 text-stone-300 flex flex-col shadow-2xl lg:shadow-none transition-transform duration-300 ${showSidebar ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}`}>
         <div className="p-6 flex items-center justify-between border-b border-stone-800">
           <div className="overflow-hidden">
-            <h2 className="font-serif font-bold text-xl text-white truncate uppercase">{db.brandConfig.appName}</h2>
+            <h2 style={{ fontFamily: db.brandConfig.logoFont || 'Playfair Display' }} className="font-bold text-xl text-white truncate uppercase">{db.brandConfig.appName}</h2>
             <p className="text-[10px] text-rose-400 uppercase tracking-widest mt-2 font-bold">{loggedInUser.role} Panel</p>
           </div>
           <button className="lg:hidden p-2 text-stone-400 hover:bg-stone-800 rounded-lg transition-colors" onClick={() => setShowSidebar(false)}><X className="w-6 h-6"/></button>
@@ -1408,10 +1241,7 @@ const AdminStats = () => {
       if (timeRange === 'all') return true;
       const oDate = new Date(o.date || o.startDate);
       if (timeRange === 'today') return oDate.toDateString() === now.toDateString();
-      if (timeRange === '7days') {
-        const d = new Date(); d.setDate(d.getDate() - 7);
-        return oDate >= d;
-      }
+      if (timeRange === '7days') { const d = new Date(); d.setDate(d.getDate() - 7); return oDate >= d; }
       if (timeRange === 'thismonth') return oDate.getMonth() === now.getMonth() && oDate.getFullYear() === now.getFullYear();
       return true;
     });
@@ -1424,17 +1254,11 @@ const AdminStats = () => {
   return (
     <div className="space-y-8 animate-fade-in-down">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-stone-800">Performa Toko</h2>
-          <p className="text-sm text-stone-500">Angka akan berubah sesuai filter waktu.</p>
-        </div>
+        <div><h2 className="text-xl font-bold text-stone-800">Performa Toko</h2><p className="text-sm text-stone-500">Angka akan berubah sesuai filter waktu.</p></div>
         <div className="flex items-center bg-white border border-stone-200 rounded-xl px-4 shadow-sm w-max">
            <Clock className="w-5 h-5 text-stone-400 mr-2"/>
            <select value={timeRange} onChange={(e) => setTimeRange(e.target.value)} className="py-3 bg-transparent text-sm font-bold text-stone-700 outline-none cursor-pointer">
-             <option value="today">Hari Ini</option>
-             <option value="7days">7 Hari Terakhir</option>
-             <option value="thismonth">Bulan Ini</option>
-             <option value="all">Semua Waktu (All Time)</option>
+             <option value="today">Hari Ini</option><option value="7days">7 Hari Terakhir</option><option value="thismonth">Bulan Ini</option><option value="all">Semua Waktu (All Time)</option>
            </select>
         </div>
       </div>
@@ -1458,25 +1282,14 @@ const AdminOrderManager = () => {
   
   const handleStatusChange = (order, newStatus) => {
     if (order.status === newStatus) return;
-    
-    if (newStatus === 'Selesai') {
-      setDendaModal({ isOpen: true, order, amount: 0, newStatus });
-      return;
-    }
-    
-    if (newStatus === 'Dibatalkan') {
-       requireApproval('CANCEL_ORDER', { orderId: order.id, newStatus: newStatus, itemIds: order.items.map(i => i.id) }, `Pesanan Dibatalkan & barang masuk Maintenance.`);
-       return;
-    }
-    
+    if (newStatus === 'Selesai') { setDendaModal({ isOpen: true, order, amount: 0, newStatus }); return; }
+    if (newStatus === 'Dibatalkan') { requireApproval('CANCEL_ORDER', { orderId: order.id, newStatus: newStatus, itemIds: order.items.map(i => i.id) }, `Pesanan Dibatalkan & barang masuk Maintenance.`); return; }
     requireApproval('UPDATE_ORDER', { id: order.id, status: newStatus, denda: 0, refund: order.totalDeposit || 0 }, `Status pesanan ${order.id} diubah ke ${newStatus}.`);
   };
 
   const confirmSelesai = () => {
     const denda = parseInt(dendaModal.amount) || 0;
-    let refund = (dendaModal.order.totalDeposit || 0) - denda;
-    if (refund < 0) refund = 0;
-    
+    let refund = (dendaModal.order.totalDeposit || 0) - denda; if (refund < 0) refund = 0;
     requireApproval('COMPLETE_ORDER', { orderId: dendaModal.order.id, newStatus: dendaModal.newStatus, denda, refund, itemIds: dendaModal.order.items.map(i => i.id) }, `Pesanan Selesai & barang masuk Maintenance.`);
     setDendaModal({ isOpen: false, order: null, amount: 0, newStatus: '' });
   };
@@ -1609,7 +1422,6 @@ const AdminInventory = () => {
   const handleImageUpload = async (e, isEdit = false) => { 
     const files = Array.from(e.target.files); 
     if (!files.length) return; 
-    
     showToast('Mengkompresi & Mengunggah gambar...', 'info');
     try {
       const uploadPromises = files.map(async (f) => {
@@ -1619,24 +1431,15 @@ const AdminInventory = () => {
         return url;
       });
       const validUrls = await Promise.all(uploadPromises);
-      
-      if (isEdit) {
-        setEditData(prev => ({ ...prev, images: [...(prev.images || []), ...validUrls] }));
-      } else {
-        setFormData(prev => ({ ...prev, images: [...(prev.images || []), ...validUrls] }));
-      }
+      if (isEdit) setEditData(prev => ({ ...prev, images: [...(prev.images || []), ...validUrls] }));
+      else setFormData(prev => ({ ...prev, images: [...(prev.images || []), ...validUrls] }));
       showToast('Gambar berhasil diunggah!', 'success');
-    } catch (error) {
-      showToast('Gagal mengunggah gambar. Simpan saja teksnya.', 'error');
-    }
+    } catch (error) { showToast('Gagal mengunggah gambar. Simpan saja teksnya.', 'error'); }
   };
 
   const removeImage = (idx, isEdit = false) => {
-    if (isEdit) {
-      setEditData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
-    } else {
-      setFormData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
-    }
+    if (isEdit) setEditData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
+    else setFormData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
   };
 
   const generateId = (cat) => { const prefix = cat ? cat.substring(0,2).toUpperCase() : 'XX'; const count = (db.products||[]).filter(p => p.id.startsWith(prefix)).length + 1; return `${prefix}-${1000 + count}`; };
@@ -1644,13 +1447,9 @@ const AdminInventory = () => {
   const handleAddProduct = (e) => { 
     e.preventDefault(); 
     requireApproval('ADD_PRODUCT', { 
-      id: generateId(formData.category), 
-      ...formData, 
-      price: parseInt(formData.price), 
-      discountPrice: formData.discountPrice ? parseInt(formData.discountPrice) : 0,
-      deposit: parseInt(formData.deposit||0), 
-      totalStock: parseInt(formData.totalStock), 
-      status: 'Tersedia' 
+      id: generateId(formData.category), ...formData, 
+      price: parseInt(formData.price), discountPrice: formData.discountPrice ? parseInt(formData.discountPrice) : 0,
+      deposit: parseInt(formData.deposit||0), totalStock: parseInt(formData.totalStock), status: 'Tersedia' 
     }, 'Produk disimpan.'); 
     setShowAddForm(false); 
     setFormData({ name: '', price: '', discountPrice: '', deposit:'', category: db.categories[0] || '', desc: '', images: [], totalStock: 1, productLink: '' }); 
@@ -1660,15 +1459,9 @@ const AdminInventory = () => {
   const handleSaveEdit = (p) => { 
     if(editData.price && editData.totalStock) { 
       requireApproval('EDIT_PRODUCT', {
-        ...p, 
-        price: parseInt(editData.price), 
-        discountPrice: editData.discountPrice ? parseInt(editData.discountPrice) : 0,
-        deposit: parseInt(editData.deposit||0), 
-        totalStock: parseInt(editData.totalStock), 
-        productLink: editData.productLink, 
-        images: editData.images
-      }, 'Perubahan disimpan.'); 
-      setEditingId(null); 
+        ...p, price: parseInt(editData.price), discountPrice: editData.discountPrice ? parseInt(editData.discountPrice) : 0,
+        deposit: parseInt(editData.deposit||0), totalStock: parseInt(editData.totalStock), productLink: editData.productLink, images: editData.images
+      }, 'Perubahan disimpan.'); setEditingId(null); 
     } 
   };
 
@@ -1726,7 +1519,6 @@ const AdminInventory = () => {
                      <div><label className="block text-sm font-bold text-stone-700 mb-2">Jumlah Fisik Barang</label><input required type="number" min="1" value={formData.totalStock} onChange={e=>setFormData({...formData, totalStock: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400" /></div>
                      <div><label className="block text-sm font-bold text-amber-700 mb-2">Deposit (Jaminan)</label><input type="number" value={formData.deposit} onChange={e=>setFormData({...formData, deposit: e.target.value})} className="w-full px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-[16px] outline-none focus:border-amber-400" /></div>
                   </div>
-                  
                   <div className="sm:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Link Referensi/Eksternal (Opsional)</label><input type="url" placeholder="https://" value={formData.productLink} onChange={e=>setFormData({...formData, productLink: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400" /></div>
                   
                   <div className="sm:col-span-2">
@@ -1734,7 +1526,7 @@ const AdminInventory = () => {
                     <div className="flex gap-3 overflow-x-auto pb-2">
                        {formData.images.map((img, idx) => (
                          <div key={idx} className="relative shrink-0">
-                           <img src={img} className="w-20 h-20 object-cover rounded-xl border border-stone-200 shadow-sm" />
+                           <img src={img} className="w-20 h-20 object-cover rounded-xl border border-stone-200 shadow-sm" alt="up"/>
                            <button type="button" onClick={() => removeImage(idx, false)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600"><X className="w-3 h-3"/></button>
                          </div>
                        ))}
@@ -1776,7 +1568,6 @@ const AdminInventory = () => {
                    {isExpanded && (
                      <div className="p-5 bg-stone-50 border-t border-stone-200 flex-1 flex flex-col">
                         <p className="text-sm text-stone-600 mb-5 flex-grow leading-relaxed">{p.desc}</p>
-                        
                         <div className="bg-white p-3 rounded-lg border border-stone-100 mb-5 text-sm font-bold text-amber-700">Uang Jaminan: {formatRupiah(p.deposit)}</div>
                         
                         {isEditing ? (
@@ -1786,13 +1577,12 @@ const AdminInventory = () => {
                              <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Stok Fisik</label><input type="number" value={editData.totalStock} onChange={e=>setEditData({...editData, totalStock: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
                              <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Deposit</label><input type="number" value={editData.deposit} onChange={e=>setEditData({...editData, deposit: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
                              <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Link Eksternal</label><input type="url" value={editData.productLink} onChange={e=>setEditData({...editData, productLink: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
-                             
                              <div>
                                <label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Album Foto Produk</label>
                                <div className="flex gap-2 overflow-x-auto pb-2 mt-2">
                                   {editData.images?.map((img, idx) => (
                                     <div key={idx} className="relative shrink-0">
-                                      <img src={img} className="w-12 h-12 object-cover rounded-lg border border-stone-200 shadow-sm" />
+                                      <img src={img} className="w-12 h-12 object-cover rounded-lg border border-stone-200 shadow-sm" alt="e"/>
                                       <button type="button" onClick={() => removeImage(idx, true)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 shadow-md hover:bg-red-600"><X className="w-3 h-3"/></button>
                                     </div>
                                   ))}
@@ -2037,12 +1827,8 @@ const AdminPrizes = () => {
     showToast('Mengkompresi gambar hadiah...', 'info');
     const compressed = await compressImage(file);
     const url = await uploadImageToServer(compressed);
-    if(url) {
-      setFormData(p => ({ ...p, image: url })); 
-      showToast('Gambar OK', 'success');
-    } else {
-      showToast('Gagal mengunggah gambar.', 'error');
-    }
+    if(url) { setFormData(p => ({ ...p, image: url })); showToast('Gambar OK', 'success'); } 
+    else { showToast('Gagal mengunggah gambar.', 'error'); }
     setIsUploading(false);
   };
   const handleAdd = (e) => { e.preventDefault(); requireApproval('ADD_PRIZE', { id: `PRZ-${Date.now()}`, name: formData.name, points: parseInt(formData.points), desc: formData.desc, image: formData.image || '' }, 'Hadiah tersimpan.'); setFormData({ name: '', points: '', desc: '', image: null }); };
@@ -2138,25 +1924,17 @@ const AdminSystemSettings = () => {
   const updateSocial = (index, field, val) => { const newS = [...bConfig.socialMedia]; newS[index][field] = val; setBConfig({...bConfig, socialMedia: newS}); };
   
   const handleLogoUpload = async (e) => { 
-    const file = e.target.files[0]; 
-    if (!file) return; 
-    setIsUploading(true);
+    const file = e.target.files[0]; if (!file) return; setIsUploading(true);
     showToast('Mengkompresi gambar logo...', 'info');
-    const compressed = await compressImage(file);
-    const url = await uploadImageToServer(compressed);
-    if (url) {
-      setBConfig({...bConfig, logoUrl: url}); 
-      showToast('Logo berhasil disiapkan.', 'success');
-    } else {
-      showToast('Gagal upload ke server gambar.', 'error');
-    }
+    const compressed = await compressImage(file); const url = await uploadImageToServer(compressed);
+    if (url) { setBConfig({...bConfig, logoUrl: url}); showToast('Logo berhasil disiapkan.', 'success'); } 
+    else { showToast('Gagal upload ke server gambar.', 'error'); }
     setIsUploading(false);
   };
 
   const handlePasswordReset = (userId, newPassword) => {
     const newUsers = (db.users||[]).map(u => u.id === userId ? { ...u, password: newPassword } : u);
-    updateDb('users', newUsers);
-    showToast(`Password staf berhasil diubah!`, 'success');
+    updateDb('users', newUsers); showToast(`Password staf berhasil diubah!`, 'success');
   };
 
   return (
@@ -2177,13 +1955,22 @@ const AdminSystemSettings = () => {
             </div>
 
             <div><label className="block text-sm font-bold text-stone-700 mb-2">Nama Aplikasi</label><input type="text" value={bConfig.appName} onChange={e=>setBConfig({...bConfig, appName: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
+            <div>
+               <label className="block text-sm font-bold text-stone-700 mb-2">Gaya Tulisan Logo (Font)</label>
+               <select value={bConfig.logoFont || 'Playfair Display'} onChange={e=>setBConfig({...bConfig, logoFont: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none cursor-pointer">
+                 <option value="Playfair Display">Playfair Display (Serif Elegan)</option>
+                 <option value="Cinzel">Cinzel (Klasik Mewah)</option>
+                 <option value="Montserrat">Montserrat (Modern Ramping)</option>
+                 <option value="Great Vibes">Great Vibes (Sambung Estetik)</option>
+               </select>
+            </div>
             <div><label className="block text-sm font-bold text-stone-700 mb-2">Warna Tema Utama</label><select value={bConfig.themeColor} onChange={e=>setBConfig({...bConfig, themeColor: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none"><option value="rose">Rose (Default)</option><option value="amber">Dark Gold / Amber</option><option value="slate">Monochrome Slate</option><option value="emerald">Emerald Green</option></select></div>
             <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Slogan Hero Banner</label><input type="text" value={bConfig.slogan} onChange={e=>setBConfig({...bConfig, slogan: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
             <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Biografi Perusahaan</label><textarea rows="3" value={bConfig.companyBio} onChange={e=>setBConfig({...bConfig, companyBio: e.target.value})} className="w-full px-5 py-4 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
             <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Email Bisnis</label><input type="email" value={bConfig.companyEmail} onChange={e=>setBConfig({...bConfig, companyEmail: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
             
             <div className="md:col-span-2 bg-stone-50 p-6 rounded-2xl border border-stone-200 mt-4">
-              <div className="flex justify-between items-center mb-6"><label className="block text-base font-serif font-bold text-stone-800">Jejaring Sosial Dinamis</label><button type="button" onClick={()=>setBConfig({...bConfig, socialMedia: [...(bConfig.socialMedia || []), {type: 'Instagram', value: '', label: ''}]})} className="text-xs bg-stone-900 text-white px-4 py-2.5 rounded-lg font-bold shadow-md hover:bg-black">+ Akun Baru</button></div>
+              <div className="flex justify-between items-center mb-6"><label className="block text-base font-serif font-bold text-stone-800">Jejaring Sosial Dinamis</label><button type="button" onClick={()=>setBConfig({...bConfig, socialMedia: [...(bConfig.socialMedia || []), {type: 'WhatsApp', value: '', label: ''}]})} className="text-xs bg-stone-900 text-white px-4 py-2.5 rounded-lg font-bold shadow-md hover:bg-black">+ Akun Baru</button></div>
               <div className="space-y-4">
                 {(bConfig.socialMedia || []).map((soc, i) => (
                   <div key={i} className="flex flex-col sm:flex-row gap-3 items-start sm:items-center bg-white p-3 rounded-xl border border-stone-100 shadow-sm">
@@ -2291,7 +2078,7 @@ const AdminDeveloperPanel = () => {
             <div className="bg-[#1e293b] p-6 md:p-8 rounded-2xl border border-emerald-500/20 shadow-inner">
                <h3 className="text-base font-bold mb-6 flex items-center gap-3 text-emerald-300"><UploadCloud className="w-5 h-5"/> VERSI SISTEM APLIKASI</h3>
                <div className="space-y-4">
-                  <div className="px-5 py-4 bg-[#0f172a] rounded-xl flex justify-between items-center border border-emerald-900/50"><span className="text-sm font-bold text-emerald-500">Versi Build Aktif</span><span className="text-xs bg-emerald-900 text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-700">v6.3.0-DASHBOARD</span></div>
+                  <div className="px-5 py-4 bg-[#0f172a] rounded-xl flex justify-between items-center border border-emerald-900/50"><span className="text-sm font-bold text-emerald-500">Versi Build Aktif</span><span className="text-xs bg-emerald-900 text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-700">v6.4.0-PREMIUM</span></div>
                   <button onClick={() => showToast('Mem-bypass limit HTTP...', 'success')} className="w-full py-4 bg-emerald-600 text-white hover:bg-emerald-500 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-emerald-900/50">Ping Git Repository Server</button>
                </div>
             </div>
