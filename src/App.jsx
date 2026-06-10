@@ -163,6 +163,7 @@ const AppStateProvider = ({ children }) => {
   };
   const cTheme = themeColors[db.brandConfig?.themeColor] || themeColors.rose;
 
+  // 1. Dynamic Font Loader
   useEffect(() => {
     const font = db.brandConfig?.logoFont || 'Playfair Display';
     const linkId = 'custom-logo-font';
@@ -170,6 +171,68 @@ const AppStateProvider = ({ children }) => {
     if (!link) { link = document.createElement('link'); link.id = linkId; link.rel = 'stylesheet'; document.head.appendChild(link); }
     link.href = `https://fonts.googleapis.com/css2?family=${font.replace(/ /g, '+')}:wght@400;700&display=swap`;
   }, [db.brandConfig?.logoFont]);
+
+  // 2. Dynamic PWA (Progressive Web App) Injector Sayang
+  useEffect(() => {
+    if (!db.brandConfig) return;
+    const { appName, themeColor, logoUrl } = db.brandConfig;
+    
+    // Fungsi pembuat Meta Tag
+    const setMeta = (name, content) => {
+      let meta = document.querySelector(`meta[name="${name}"]`);
+      if (!meta) { 
+         meta = document.createElement('meta'); 
+         meta.name = name; 
+         document.head.appendChild(meta); 
+      }
+      meta.content = content;
+    };
+
+    // Meta Tags ajaib untuk iOS & PWA
+    setMeta('apple-mobile-web-app-capable', 'yes');
+    setMeta('apple-mobile-web-app-status-bar-style', 'black-translucent');
+    setMeta('apple-mobile-web-app-title', appName || 'Aisya Wardrobe');
+    setMeta('theme-color', themeColor === 'slate' ? '#1e293b' : '#fafaf9');
+
+    // Suntikkan Ikon Layar Utama (Apple Touch Icon)
+    if (logoUrl) {
+      let linkIcon = document.querySelector('link[rel="apple-touch-icon"]');
+      if (!linkIcon) { 
+         linkIcon = document.createElement('link'); 
+         linkIcon.rel = 'apple-touch-icon'; 
+         document.head.appendChild(linkIcon); 
+      }
+      linkIcon.href = logoUrl;
+    }
+
+    // Bangun file Manifest buatan (Blob) agar bisa di-install
+    const manifest = {
+      name: appName || 'Aisya Wardrobe', 
+      short_name: appName || 'Aisya',
+      display: 'standalone', 
+      start_url: '/', 
+      background_color: '#fafaf9', 
+      theme_color: '#1c1917',
+      icons: logoUrl ? [
+        { src: logoUrl, sizes: '192x192', type: 'image/png' }, 
+        { src: logoUrl, sizes: '512x512', type: 'image/png' }
+      ] : []
+    };
+
+    const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+    const manifestUrl = URL.createObjectURL(manifestBlob);
+    
+    let manifestLink = document.querySelector('link[rel="manifest"]');
+    if (!manifestLink) { 
+       manifestLink = document.createElement('link'); 
+       manifestLink.rel = 'manifest'; 
+       document.head.appendChild(manifestLink); 
+    }
+    manifestLink.href = manifestUrl;
+
+    // Pembersihan memori saat komponen di-unmount
+    return () => URL.revokeObjectURL(manifestUrl);
+  }, [db.brandConfig?.appName, db.brandConfig?.logoUrl, db.brandConfig?.themeColor]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(stateDocRef, (docSnap) => {
@@ -390,7 +453,7 @@ const SplashScreen = () => {
     <div className="fixed inset-0 bg-stone-900 flex flex-col items-center justify-center z-[9999]">
       <div className="w-24 h-24 bg-gradient-to-tr from-amber-500 to-amber-700 rounded-full flex items-center justify-center mb-6 shadow-[0_0_40px_rgba(212,175,55,0.4)] animate-pulse">
         {db?.brandConfig?.logoUrl ? (
-          <img src={db.brandConfig.logoUrl} className="w-14 h-14 object-contain filter brightness-0 invert" alt="Logo" />
+          <img src={db.brandConfig.logoUrl} className="w-16 h-16 object-contain filter drop-shadow-md" alt="Logo" />
         ) : db?.brandConfig?.appIcon ? (
           <span className="text-4xl">{db.brandConfig.appIcon}</span>
         ) : (
@@ -1344,7 +1407,6 @@ const AdminStats = () => {
         <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"><div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mb-4"><Users className="w-6 h-6"/></div><div className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-1">Total Member</div><div className="text-2xl font-bold text-stone-800">{(db.members||[]).filter(m=>m.status === 'approved').length}</div></div>
       </div>
 
-      {/* TABEL / DAFTAR RIWAYAT PEMASUKAN */}
       <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden mt-8 w-full">
         <div className="p-6 md:p-8 border-b border-stone-100 bg-stone-50 flex items-center gap-4">
           <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center"><History className="w-6 h-6"/></div>
@@ -1391,7 +1453,6 @@ const AdminStats = () => {
                   {isExpanded && (
                     <div className="p-5 md:p-6 bg-stone-50 border-t border-stone-200">
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Rincian Pakaian */}
                         <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm">
                           <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4 border-b border-stone-100 pb-3 flex items-center gap-2"><Package className="w-4 h-4"/> Rincian Sewa Pakaian</h5>
                           <div className="space-y-3">
@@ -1407,7 +1468,6 @@ const AdminStats = () => {
                           </div>
                         </div>
 
-                        {/* Rincian Keuangan */}
                         <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm flex flex-col justify-center">
                           <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4 border-b border-stone-100 pb-3 flex items-center gap-2"><Briefcase className="w-4 h-4"/> Kalkulasi Keuangan</h5>
                           <div className="space-y-2.5 text-sm">
@@ -1926,7 +1986,6 @@ const AdminCustomers = () => {
   const { db, handleApproval, loggedInUser, cTheme } = useContext(AppStateContext);
   const [tab, setTab] = useState('member');
   
-  // State untuk Laci dan Edit
   const [expandedMemberId, setExpandedMemberId] = useState(null);
   const [editingMemberId, setEditingMemberId] = useState(null);
   const [editForm, setEditForm] = useState({});
@@ -1953,7 +2012,6 @@ const AdminCustomers = () => {
   };
 
   const saveEdit = (originalMember) => {
-    handleApproval({ actionType: 'UPDATE_MEMBER', payload: { ...originalMember, ...editForm } });
     if (canEdit) {
       requireApproval('UPDATE_MEMBER', { id: originalMember.id, ...editForm }, 'Data pelanggan berhasil diperbarui.', true);
     }
@@ -2268,7 +2326,6 @@ const AdminSystemSettings = () => {
             <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Biografi Perusahaan</label><textarea rows="3" value={bConfig.companyBio} onChange={e=>setBConfig({...bConfig, companyBio: e.target.value})} className="w-full px-5 py-4 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
             <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Email Bisnis</label><input type="email" value={bConfig.companyEmail} onChange={e=>setBConfig({...bConfig, companyEmail: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
             
-            {/* PENGATURAN BENTO GRID */}
             <div className="md:col-span-2 bg-amber-50 p-6 rounded-2xl border border-amber-200 mt-4">
                <h3 className="font-bold text-stone-800 flex items-center gap-2 mb-2"><Grid className="w-5 h-5 text-amber-600"/> Highlight Beranda (Bento Mosaik)</h3>
                <p className="text-sm text-stone-600 mb-5">Pilih 3 kategori produk untuk ditampilkan secara elegan di halaman beranda.</p>
@@ -2394,7 +2451,7 @@ const AdminDeveloperPanel = () => {
             <div className="bg-[#1e293b] p-6 md:p-8 rounded-2xl border border-emerald-500/20 shadow-inner">
                <h3 className="text-base font-bold mb-6 flex items-center gap-3 text-emerald-300"><UploadCloud className="w-5 h-5"/> VERSI SISTEM APLIKASI</h3>
                <div className="space-y-4">
-                  <div className="px-5 py-4 bg-[#0f172a] rounded-xl flex justify-between items-center border border-emerald-900/50"><span className="text-sm font-bold text-emerald-500">Versi Build Aktif</span><span className="text-xs bg-emerald-900 text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-700">v7.0.0-BENTO</span></div>
+                  <div className="px-5 py-4 bg-[#0f172a] rounded-xl flex justify-between items-center border border-emerald-900/50"><span className="text-sm font-bold text-emerald-500">Versi Build Aktif</span><span className="text-xs bg-emerald-900 text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-700">v8.0.0-PWA</span></div>
                   <button onClick={() => showToast('Mem-bypass limit HTTP...', 'success')} className="w-full py-4 bg-emerald-600 text-white hover:bg-emerald-500 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-emerald-900/50">Ping Git Repository Server</button>
                </div>
             </div>
