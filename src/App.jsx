@@ -5,7 +5,7 @@ import {
   AlertCircle, Search, Menu, LogOut, User, Settings as SettingsIcon, 
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Upload, Shield, 
   Briefcase, FileText, Download, UploadCloud, Terminal,
-  UserPlus, Award, Gift, Users, Edit3, ClipboardList, Heart, Printer, MessageCircle, ExternalLink, MoreVertical, Database, Tag, Star, TrendingUp, Sparkles, Grid
+  UserPlus, Award, Gift, Users, Edit3, ClipboardList, Heart, Printer, MessageCircle, ExternalLink, MoreVertical, Database, Tag, Star, TrendingUp, Sparkles, Grid, History
 } from 'lucide-react';
 
 import { initializeApp } from "firebase/app";
@@ -30,7 +30,7 @@ const stateDocRef = doc(dbFirestore, "aisya_database", "main_state");
 
 const IMGBB_API_KEY = "aab30f3a1714c46f739b7d56dd87a5b3"; 
 
-const compressImage = (file) => {
+const compressImage = (file, preserveTransparency = false) => {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -44,8 +44,16 @@ const compressImage = (file) => {
         let height = img.height;
         if (width > MAX_WIDTH) { height = Math.round((height *= MAX_WIDTH / width)); width = MAX_WIDTH; }
         canvas.width = width; canvas.height = height;
-        const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.6)); 
+        const ctx = canvas.getContext('2d'); 
+        
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        if (preserveTransparency) {
+           resolve(canvas.toDataURL('image/png')); 
+        } else {
+           resolve(canvas.toDataURL('image/jpeg', 0.6)); 
+        }
       };
     };
   });
@@ -130,7 +138,7 @@ const getInitialData = () => {
       appName: 'Aisya Wardrobe', slogan: 'Sewa Pakaian Premium & Eksklusif', companyBio: 'Penyedia layanan sewa pakaian premium terpercaya untuk momen spesial Anda.',
       logoUrl: '', appIcon: '', themeColor: 'rose', logoFont: 'Playfair Display', companyEmail: 'admin@aisyawardrobe.com',
       socialMedia: [{ type: 'WhatsApp', value: '6281234567890', label: 'Hubungi Kami' }],
-      bentoCategories: ['Kebaya', 'Gaun', 'Jas'] // Default Bento Grid
+      bentoCategories: ['Kebaya', 'Gaun', 'Jas'] 
     }
   };
 };
@@ -204,11 +212,19 @@ const AppStateProvider = ({ children }) => {
 
   const login = (username, password) => {
     if (isDbLoading) return false;
-    const user = (db.users || []).find(u => u.username === username && u.password === password);
-    if (user) { setLoggedInUser(user); setView('admin'); saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Login Admin', user.name) }); return true; }
+    const currentUsers = (db.users && db.users.length > 0) ? db.users : getInitialData().users;
+    const user = currentUsers.find(u => u.username === username && u.password === password);
+    
+    if (user) { 
+       setLoggedInUser(user); setView('admin'); 
+       if (!isDbLoading) { saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Login Admin', user.name) }); }
+       return true; 
+    }
+    
     if (username === 'dev' && password === 'dev') {
        setLoggedInUser({ id: 'U0', username: 'dev', password: 'dev', name: 'Developer System', role: 'developer' }); setView('admin'); 
-       saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Bypass Login Developer', 'Developer') }); return true;
+       if (!isDbLoading) { saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Bypass Login Developer', 'Developer') }); }
+       return true;
     }
     return false;
   };
@@ -248,6 +264,10 @@ const AppStateProvider = ({ children }) => {
       case 'REGISTER_MEMBER':
         const newId = `MEM-${new Date().getFullYear().toString().slice(-2)}${String((newDb.members||[]).length + 1).padStart(3, '0')}`;
         newDb.members = [{ ...payload, id: newId, points: 0, status: 'approved', wishlist: [] }, ...(newDb.members||[])]; actStr='Member'; detStr=`Setuju member: ${newId}`; break;
+      case 'UPDATE_MEMBER':
+        newDb.members = (newDb.members||[]).map(m => m.id === payload.id ? { ...m, ...payload } : m);
+        if(loggedInMember?.id === payload.id) setLoggedInMember(prev => ({...prev, ...payload}));
+        actStr='Member'; detStr=`Update Profil Member: ${payload.name}`; break;
       case 'UPDATE_USER': 
         newDb.users = (newDb.users||[]).map(u => u.id === payload.userId ? { ...u, ...payload } : u);
         if(loggedInUser?.id === payload.userId) setLoggedInUser(prev => ({...prev, ...payload})); actStr='Pengguna'; detStr=`Update Profil/Pass: ${payload.username}`; break;
@@ -469,7 +489,7 @@ const CustomerLayout = ({ children }) => {
         <div className="max-w-6xl mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-10">
           <div>
             <div className="flex items-center gap-3 mb-6 cursor-pointer" onClick={() => setView('dashboard')}>
-               {db.brandConfig.logoUrl ? <img src={db.brandConfig.logoUrl} alt="Logo" className="h-8 object-contain brightness-0 invert" /> : 
+               {db.brandConfig.logoUrl ? <img src={db.brandConfig.logoUrl} alt="Logo" className="h-8 object-contain" /> : 
                 db.brandConfig.appIcon ? <span className="text-3xl">{db.brandConfig.appIcon}</span> : <Package className={`w-8 h-8 text-amber-500`} />}
                <span style={{ fontFamily: db.brandConfig.logoFont || 'Playfair Display' }} className="text-2xl font-bold text-white tracking-wider">{db.brandConfig.appName}</span>
             </div>
@@ -512,12 +532,11 @@ const BentoCategoryBox = ({ categoryName, className }) => {
   const { db, setView } = useContext(AppStateContext);
   const [currentIdx, setCurrentIdx] = useState(0);
 
-  // Ambil gambar-gambar produk dari kategori yang dipilih
   const categoryImages = useMemo(() => {
     const productsInCat = (db.products || []).filter(p => p.category === categoryName && p.status !== 'Maintenance');
     let images = [];
     productsInCat.forEach(p => { if (p.images && p.images.length > 0) images.push(p.images[0]); });
-    return images.length > 0 ? images.slice(0, 5) : ['https://images.unsplash.com/photo-1550639524-a6f58345a278?q=80&w=800&auto=format&fit=crop']; // Fallback image
+    return images.length > 0 ? images.slice(0, 5) : ['https://images.unsplash.com/photo-1550639524-a6f58345a278?q=80&w=800&auto=format&fit=crop']; 
   }, [db.products, categoryName]);
 
   useEffect(() => {
@@ -528,13 +547,11 @@ const BentoCategoryBox = ({ categoryName, className }) => {
 
   return (
     <div onClick={() => setView('catalog')} className={`relative overflow-hidden rounded-3xl cursor-pointer group shadow-sm hover:shadow-xl transition-all duration-500 ${className}`}>
-      {/* Background Slideshow */}
       {categoryImages.map((img, idx) => (
          <div key={idx} className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 group-hover:scale-110 ease-in-out ${idx === currentIdx ? 'opacity-100' : 'opacity-0'}`} style={{ backgroundImage: `url(${img})` }}></div>
       ))}
       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
       
-      {/* Konten Kaca Buram */}
       <div className="absolute bottom-6 left-6 right-6">
          <div className="bg-white/20 backdrop-blur-md border border-white/30 p-5 rounded-2xl flex items-center justify-between group-hover:bg-amber-600/90 group-hover:border-amber-500 transition-colors duration-300">
             <div>
@@ -572,7 +589,7 @@ const ProductCardItem = ({ product, openDetail }) => {
         {product.images?.length > 1 ? (
           <div className="flex overflow-x-auto snap-x snap-mandatory h-full w-full no-scrollbar" onClick={e => e.stopPropagation()}>
             {product.images.map((img, idx) => (
-              <img key={idx} src={img} alt={`${product.name}`} className="w-full h-full object-cover shrink-0 snap-center lg:group-hover:scale-110 transition-transform duration-700" />
+              <img key={idx} src={img} alt={`${product.name} - Gambar ${idx + 1}`} className="w-full h-full object-cover shrink-0 snap-center lg:group-hover:scale-110 transition-transform duration-700" />
             ))}
           </div>
         ) : (
@@ -692,7 +709,6 @@ const DashboardView = () => {
   return (
     <div className="space-y-12 md:space-y-16 animate-fade-in-down w-full flex-grow">
       
-      {/* HERO BANNER TETAP MEWAH */}
       <div className={`relative ${cTheme.bg} rounded-[2.5rem] overflow-hidden shadow-2xl min-h-[400px] flex items-center`}>
         <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1490481651871-ab68de25d43d?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-20 mix-blend-overlay"></div>
         <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/30 to-transparent"></div>
@@ -706,20 +722,17 @@ const DashboardView = () => {
         </div>
       </div>
 
-      {/* BENTO GRID (3 KOTAK MOSAIK) */}
       <div className="relative">
          <div className="flex justify-between items-end mb-8">
             <div><h2 className="text-3xl font-serif font-bold text-stone-900 flex items-center gap-3"><Grid className="w-8 h-8 text-amber-500"/> Kategori Unggulan</h2><p className="text-stone-500 mt-2">Pilihan utama pelanggan untuk berbagai momen.</p></div>
          </div>
          
-         {/* Tampilan Desktop & Tablet (Grid Asimetris) */}
          <div className="hidden md:grid grid-cols-3 grid-rows-2 gap-6 h-[500px]">
             <BentoCategoryBox categoryName={bentoCats[0]} className="col-span-2 row-span-2" />
             <BentoCategoryBox categoryName={bentoCats[1]} className="col-span-1 row-span-1" />
             <BentoCategoryBox categoryName={bentoCats[2]} className="col-span-1 row-span-1" />
          </div>
 
-         {/* Tampilan HP (Horizontal Swipe) */}
          <div className="md:hidden flex overflow-x-auto gap-4 pb-6 no-scrollbar snap-x snap-mandatory">
             <BentoCategoryBox categoryName={bentoCats[0]} className="w-[85vw] h-[350px] shrink-0 snap-center" />
             <BentoCategoryBox categoryName={bentoCats[1]} className="w-[85vw] h-[350px] shrink-0 snap-center" />
@@ -1295,6 +1308,7 @@ const AdminLayout = () => {
 const AdminStats = () => {
   const { db } = useContext(AppStateContext);
   const [timeRange, setTimeRange] = useState('all');
+  const [expandedOrderId, setExpandedOrderId] = useState(null);
 
   const filterByTime = (ordersList) => {
     const now = new Date();
@@ -1313,7 +1327,7 @@ const AdminStats = () => {
   const revenue = completed.reduce((s, o) => s + (o.total - (o.totalDeposit||0) + (o.denda||0)), 0);
 
   return (
-    <div className="space-y-8 animate-fade-in-down">
+    <div className="space-y-8 animate-fade-in-down w-full">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <div><h2 className="text-xl font-bold text-stone-800">Performa Toko</h2><p className="text-sm text-stone-500">Angka akan berubah sesuai filter waktu.</p></div>
         <div className="flex items-center bg-white border border-stone-200 rounded-xl px-4 shadow-sm w-max">
@@ -1324,10 +1338,98 @@ const AdminStats = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"><div className="w-12 h-12 bg-green-50 text-green-600 rounded-2xl flex items-center justify-center mb-4"><BarChart3 className="w-6 h-6"/></div><div className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-1">Pendapatan Selesai</div><div className="text-2xl font-bold text-stone-800 truncate">{formatRupiah(revenue)}</div></div>
         <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"><div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4"><Package className="w-6 h-6"/></div><div className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-1">Pesanan Aktif</div><div className="text-2xl font-bold text-stone-800">{active.length}</div></div>
         <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm"><div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mb-4"><Users className="w-6 h-6"/></div><div className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-1">Total Member</div><div className="text-2xl font-bold text-stone-800">{(db.members||[]).filter(m=>m.status === 'approved').length}</div></div>
+      </div>
+
+      {/* TABEL / DAFTAR RIWAYAT PEMASUKAN */}
+      <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden mt-8 w-full">
+        <div className="p-6 md:p-8 border-b border-stone-100 bg-stone-50 flex items-center gap-4">
+          <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center"><History className="w-6 h-6"/></div>
+          <div>
+            <h3 className="font-bold text-lg text-stone-800">Riwayat Pemasukan</h3>
+            <p className="text-sm text-stone-500">Detail pesanan yang telah selesai dan menghasilkan pendapatan.</p>
+          </div>
+        </div>
+        
+        <div className="p-6 md:p-8 space-y-4">
+          {completed.length === 0 ? (
+            <div className="text-center py-10 bg-stone-50 border border-dashed border-stone-300 rounded-2xl text-stone-500">
+               Belum ada data pemasukan pada periode ini.
+            </div>
+          ) : (
+            completed.map(o => {
+              const isExpanded = expandedOrderId === o.id;
+              const netIncome = o.total - (o.totalDeposit || 0) + (o.denda || 0);
+
+              return (
+                <div key={`inc-${o.id}`} className="border border-stone-200 rounded-2xl overflow-hidden hover:shadow-sm transition-shadow bg-white">
+                  <div 
+                    onClick={() => setExpandedOrderId(isExpanded ? null : o.id)}
+                    className="flex flex-col sm:flex-row justify-between sm:items-center p-4 cursor-pointer hover:bg-stone-50 gap-3"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 bg-stone-100 text-stone-500 rounded-full flex items-center justify-center shrink-0 border border-stone-200">
+                        <CheckCircle className="w-5 h-5 text-green-500"/>
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm md:text-base text-stone-800">{o.customer.name}</h4>
+                        <p className="text-xs text-stone-500 font-mono mt-0.5">{o.id} &bull; Selesai Tgl: {o.endDate || o.date}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between sm:justify-end gap-4 pl-14 sm:pl-0 w-full sm:w-auto">
+                      <div className="text-left sm:text-right">
+                        <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider mb-0.5">Pendapatan Bersih</p>
+                        <span className="font-bold text-green-600 text-base md:text-lg">+{formatRupiah(netIncome)}</span>
+                      </div>
+                      <ChevronDown className={`w-5 h-5 text-stone-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="p-5 md:p-6 bg-stone-50 border-t border-stone-200">
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Rincian Pakaian */}
+                        <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm">
+                          <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4 border-b border-stone-100 pb-3 flex items-center gap-2"><Package className="w-4 h-4"/> Rincian Sewa Pakaian</h5>
+                          <div className="space-y-3">
+                            {o.items.map(item => (
+                              <div key={`inc-item-${item.id}`} className="flex items-center gap-3">
+                                <img src={item.images?.[0] || 'https://placehold.co/400'} alt={item.name} className="w-12 h-12 rounded-xl border border-stone-100 object-cover shadow-sm"/>
+                                <div>
+                                  <p className="font-bold text-sm text-stone-800">{item.quantity}x {item.name}</p>
+                                  <p className="text-[10px] text-stone-500 font-mono">{item.id}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Rincian Keuangan */}
+                        <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm flex flex-col justify-center">
+                          <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4 border-b border-stone-100 pb-3 flex items-center gap-2"><Briefcase className="w-4 h-4"/> Kalkulasi Keuangan</h5>
+                          <div className="space-y-2.5 text-sm">
+                            <div className="flex justify-between text-stone-600"><span>Tagihan Kotor (Total):</span> <span className="font-medium">{formatRupiah(o.total)}</span></div>
+                            <div className="flex justify-between text-stone-600"><span>Durasi Sewa:</span> <span className="font-medium">{o.duration} Hari</span></div>
+                            <div className="flex justify-between text-amber-600"><span>Deposit Jaminan:</span> <span className="font-medium">{formatRupiah(o.totalDeposit || 0)}</span></div>
+                            <div className="flex justify-between text-red-500"><span>Denda (Kerusakan/Telat):</span> <span className="font-medium">+{formatRupiah(o.denda || 0)}</span></div>
+                            <div className="flex justify-between text-blue-600"><span>Pengembalian Deposit (Refund):</span> <span className="font-medium">-{formatRupiah(o.totalRefundDeposit || 0)}</span></div>
+                            <div className="pt-3 mt-3 border-t border-stone-200 flex justify-between items-center">
+                              <span className="font-bold text-stone-800">Pendapatan Bersih:</span>
+                              <span className="font-bold text-green-600 text-xl">{formatRupiah(netIncome)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1483,24 +1585,34 @@ const AdminInventory = () => {
   const handleImageUpload = async (e, isEdit = false) => { 
     const files = Array.from(e.target.files); 
     if (!files.length) return; 
+    
     showToast('Mengkompresi & Mengunggah gambar...', 'info');
     try {
       const uploadPromises = files.map(async (f) => {
-        const compressed = await compressImage(f);
+        const compressed = await compressImage(f); 
         const url = await uploadImageToServer(compressed);
         if(!url) throw new Error("Gagal ImgBB");
         return url;
       });
       const validUrls = await Promise.all(uploadPromises);
-      if (isEdit) setEditData(prev => ({ ...prev, images: [...(prev.images || []), ...validUrls] }));
-      else setFormData(prev => ({ ...prev, images: [...(prev.images || []), ...validUrls] }));
+      
+      if (isEdit) {
+        setEditData(prev => ({ ...prev, images: [...(prev.images || []), ...validUrls] }));
+      } else {
+        setFormData(prev => ({ ...prev, images: [...(prev.images || []), ...validUrls] }));
+      }
       showToast('Gambar berhasil diunggah!', 'success');
-    } catch (error) { showToast('Gagal mengunggah gambar. Simpan saja teksnya.', 'error'); }
+    } catch (error) {
+      showToast('Gagal mengunggah gambar. Simpan saja teksnya.', 'error');
+    }
   };
 
   const removeImage = (idx, isEdit = false) => {
-    if (isEdit) setEditData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
-    else setFormData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
+    if (isEdit) {
+      setEditData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
+    } else {
+      setFormData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
+    }
   };
 
   const generateId = (cat) => { const prefix = cat ? cat.substring(0,2).toUpperCase() : 'XX'; const count = (db.products||[]).filter(p => p.id.startsWith(prefix)).length + 1; return `${prefix}-${1000 + count}`; };
@@ -1508,9 +1620,13 @@ const AdminInventory = () => {
   const handleAddProduct = (e) => { 
     e.preventDefault(); 
     requireApproval('ADD_PRODUCT', { 
-      id: generateId(formData.category), ...formData, 
-      price: parseInt(formData.price), discountPrice: formData.discountPrice ? parseInt(formData.discountPrice) : 0,
-      deposit: parseInt(formData.deposit||0), totalStock: parseInt(formData.totalStock), status: 'Tersedia' 
+      id: generateId(formData.category), 
+      ...formData, 
+      price: parseInt(formData.price), 
+      discountPrice: formData.discountPrice ? parseInt(formData.discountPrice) : 0,
+      deposit: parseInt(formData.deposit||0), 
+      totalStock: parseInt(formData.totalStock), 
+      status: 'Tersedia' 
     }, 'Produk disimpan.'); 
     setShowAddForm(false); 
     setFormData({ name: '', price: '', discountPrice: '', deposit:'', category: db.categories[0] || '', desc: '', images: [], totalStock: 1, productLink: '' }); 
@@ -1520,9 +1636,15 @@ const AdminInventory = () => {
   const handleSaveEdit = (p) => { 
     if(editData.price && editData.totalStock) { 
       requireApproval('EDIT_PRODUCT', {
-        ...p, price: parseInt(editData.price), discountPrice: editData.discountPrice ? parseInt(editData.discountPrice) : 0,
-        deposit: parseInt(editData.deposit||0), totalStock: parseInt(editData.totalStock), productLink: editData.productLink, images: editData.images
-      }, 'Perubahan disimpan.'); setEditingId(null); 
+        ...p, 
+        price: parseInt(editData.price), 
+        discountPrice: editData.discountPrice ? parseInt(editData.discountPrice) : 0,
+        deposit: parseInt(editData.deposit||0), 
+        totalStock: parseInt(editData.totalStock), 
+        productLink: editData.productLink, 
+        images: editData.images
+      }, 'Perubahan disimpan.'); 
+      setEditingId(null); 
     } 
   };
 
@@ -1803,6 +1925,12 @@ const AdminCalendar = () => {
 const AdminCustomers = () => {
   const { db, handleApproval, loggedInUser, cTheme } = useContext(AppStateContext);
   const [tab, setTab] = useState('member');
+  
+  // State untuk Laci dan Edit
+  const [expandedMemberId, setExpandedMemberId] = useState(null);
+  const [editingMemberId, setEditingMemberId] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  
   const approvedMembers = (db.members||[]).filter(m => m.status === 'approved');
   const nonMembers = (db.orders||[]).filter(o => !o.memberId).reduce((acc, order) => {
      const existing = acc.find(c => c.identity === order.customer.identity);
@@ -1810,6 +1938,27 @@ const AdminCustomers = () => {
      return acc;
   }, []);
   const memberApps = (db.approvals||[]).filter(a => a.actionType === 'REGISTER_MEMBER');
+
+  const canEdit = ['owner', 'developer'].includes(loggedInUser?.role);
+
+  const startEdit = (e, m) => {
+    e.stopPropagation();
+    setEditingMemberId(m.id);
+    setEditForm({
+      name: m.name || '', username: m.username || '', identity: m.identity || '', 
+      phone: m.phone || '', gender: m.gender || 'Perempuan', 
+      birthPlace: m.birthPlace || '', birthDate: m.birthDate || '', 
+      address: m.address || '', socialMedia: m.socialMedia || ''
+    });
+  };
+
+  const saveEdit = (originalMember) => {
+    handleApproval({ actionType: 'UPDATE_MEMBER', payload: { ...originalMember, ...editForm } });
+    if (canEdit) {
+      requireApproval('UPDATE_MEMBER', { id: originalMember.id, ...editForm }, 'Data pelanggan berhasil diperbarui.', true);
+    }
+    setEditingMemberId(null);
+  };
 
   return (
     <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden animate-fade-in-down w-full">
@@ -1824,16 +1973,89 @@ const AdminCustomers = () => {
           <table className="w-full text-left border-collapse min-w-[700px]">
             <thead><tr className="bg-stone-50 text-stone-500 font-bold border-b border-stone-200 text-xs uppercase tracking-wider"><th className="p-5">Profil</th><th className="p-5">Kontak</th><th className="p-5 text-right">Poin</th></tr></thead>
             <tbody className="divide-y divide-stone-100">
-              {approvedMembers.map(m => (
-                <tr key={m.id} className="hover:bg-stone-50/50">
-                  <td className="p-5 flex items-center gap-4">
-                    {m.photoUrl ? <img src={m.photoUrl} alt="Pic" className="w-12 h-12 rounded-full object-cover border"/> : <div className="w-12 h-12 rounded-full bg-stone-100 border flex items-center justify-center"><User className="w-6 h-6 text-stone-400"/></div>}
-                    <div><p className="font-bold text-stone-800 text-base">{m.name}</p><p className="text-xs font-mono text-stone-500 mt-1">{m.id}</p></div>
-                  </td>
-                  <td className="p-5"><p className="font-bold text-stone-700">{m.phone}</p><p className="text-xs text-stone-500 mt-1">{m.email}</p></td>
-                  <td className="p-5 text-right"><span className="font-bold text-rose-700 bg-rose-50 px-4 py-2 rounded-xl border border-rose-200 inline-flex items-center gap-2 shadow-sm"><Award className="w-5 h-5"/> {m.points}</span></td>
-                </tr>
-              ))}
+              {approvedMembers.length === 0 ? <tr><td colSpan="3" className="text-center py-10 text-stone-500">Belum ada member.</td></tr> : approvedMembers.map(m => {
+                const isExpanded = expandedMemberId === m.id;
+                const isEditing = editingMemberId === m.id;
+
+                return (
+                  <React.Fragment key={m.id}>
+                    <tr onClick={() => { if(!isEditing) { setExpandedMemberId(isExpanded ? null : m.id); setEditingMemberId(null); } }} className={`transition-colors ${isEditing ? 'bg-amber-50 cursor-default' : 'cursor-pointer hover:bg-stone-50/50'} ${isExpanded && !isEditing ? 'bg-stone-50' : ''}`}>
+                      <td className="p-5 flex items-center gap-4">
+                        {m.photoUrl ? <img src={m.photoUrl} alt="Pic" className="w-12 h-12 rounded-full object-cover border"/> : <div className="w-12 h-12 rounded-full bg-stone-100 border flex items-center justify-center"><User className="w-6 h-6 text-stone-400"/></div>}
+                        <div><p className="font-bold text-stone-800 text-base">{m.name}</p><p className="text-xs font-mono text-stone-500 mt-1">{m.id}</p></div>
+                      </td>
+                      <td className="p-5"><p className="font-bold text-stone-700">{m.phone}</p><p className="text-xs text-stone-500 mt-1">{m.email}</p></td>
+                      <td className="p-5 text-right">
+                         <div className="flex items-center justify-end gap-4">
+                           <span className="font-bold text-rose-700 bg-rose-50 px-4 py-2 rounded-xl border border-rose-200 inline-flex items-center gap-2 shadow-sm"><Award className="w-5 h-5"/> {m.points}</span>
+                           <ChevronDown className={`w-5 h-5 text-stone-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                         </div>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr>
+                        <td colSpan="3" className="p-0 border-b-0">
+                          <div className={`p-6 md:p-8 border-t border-stone-200 shadow-inner ${isEditing ? 'bg-amber-50/30' : 'bg-stone-50'}`}>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                               <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm col-span-1 md:col-span-2">
+                                  <div className="flex justify-between items-center mb-4 border-b border-stone-100 pb-3">
+                                      <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider flex items-center gap-2"><FileText className="w-4 h-4"/> Informasi Lengkap Member</h5>
+                                      {canEdit && !isEditing && (
+                                          <button onClick={(e) => startEdit(e, m)} className="text-xs font-bold text-amber-600 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors"><Edit3 className="w-3 h-3"/> Edit Data Pelanggan</button>
+                                      )}
+                                  </div>
+                                  
+                                  {isEditing ? (
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-4 gap-x-6">
+                                         <div><label className="text-xs font-bold text-stone-500 mb-1 block">Nama Lengkap</label><input type="text" value={editForm.name} onChange={e=>setEditForm({...editForm, name: e.target.value})} className="w-full px-3 py-2 border border-stone-200 rounded-lg outline-none focus:border-amber-500 text-sm" /></div>
+                                         <div><label className="text-xs font-bold text-stone-500 mb-1 block">Username Login</label><input type="text" value={editForm.username} onChange={e=>setEditForm({...editForm, username: e.target.value})} className="w-full px-3 py-2 border border-stone-200 rounded-lg outline-none focus:border-amber-500 text-sm" /></div>
+                                         <div><label className="text-xs font-bold text-stone-500 mb-1 block">NIK KTP</label><input type="text" value={editForm.identity} onChange={e=>setEditForm({...editForm, identity: e.target.value})} className="w-full px-3 py-2 border border-stone-200 rounded-lg outline-none focus:border-amber-500 text-sm" /></div>
+                                         <div><label className="text-xs font-bold text-stone-500 mb-1 block">No WhatsApp</label><input type="text" value={editForm.phone} onChange={e=>setEditForm({...editForm, phone: e.target.value})} className="w-full px-3 py-2 border border-stone-200 rounded-lg outline-none focus:border-amber-500 text-sm" /></div>
+                                         <div><label className="text-xs font-bold text-stone-500 mb-1 block">Jenis Kelamin</label><select value={editForm.gender} onChange={e=>setEditForm({...editForm, gender: e.target.value})} className="w-full px-3 py-2 border border-stone-200 rounded-lg outline-none focus:border-amber-500 text-sm"><option>Perempuan</option><option>Laki-Laki</option></select></div>
+                                         <div className="flex gap-2">
+                                            <div className="w-1/2"><label className="text-xs font-bold text-stone-500 mb-1 block">Tempat Lahir</label><input type="text" value={editForm.birthPlace} onChange={e=>setEditForm({...editForm, birthPlace: e.target.value})} className="w-full px-3 py-2 border border-stone-200 rounded-lg outline-none focus:border-amber-500 text-sm" /></div>
+                                            <div className="w-1/2"><label className="text-xs font-bold text-stone-500 mb-1 block">Tanggal Lahir</label><input type="date" value={editForm.birthDate} onChange={e=>setEditForm({...editForm, birthDate: e.target.value})} className="w-full px-3 py-2 border border-stone-200 rounded-lg outline-none focus:border-amber-500 text-sm" /></div>
+                                         </div>
+                                         <div className="sm:col-span-2"><label className="text-xs font-bold text-stone-500 mb-1 block">Alamat Domisili</label><textarea value={editForm.address} onChange={e=>setEditForm({...editForm, address: e.target.value})} rows="2" className="w-full px-3 py-2 border border-stone-200 rounded-lg outline-none focus:border-amber-500 text-sm" /></div>
+                                         <div className="sm:col-span-2"><label className="text-xs font-bold text-stone-500 mb-1 block">Akun Sosial Media</label><input type="text" value={editForm.socialMedia} onChange={e=>setEditForm({...editForm, socialMedia: e.target.value})} className="w-full px-3 py-2 border border-stone-200 rounded-lg outline-none focus:border-amber-500 text-sm" /></div>
+                                         
+                                         <div className="sm:col-span-2 flex gap-3 pt-2 mt-2 border-t border-stone-100">
+                                            <button onClick={() => setEditingMemberId(null)} className="flex-1 py-2.5 bg-stone-100 text-stone-600 font-bold rounded-xl text-sm hover:bg-stone-200 transition-colors">Batal</button>
+                                            <button onClick={() => saveEdit(m)} className={`flex-1 py-2.5 ${cTheme.bg} text-white font-bold rounded-xl text-sm shadow-md hover:brightness-110 transition-all`}>Simpan Perubahan</button>
+                                         </div>
+                                      </div>
+                                  ) : (
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-4 gap-x-6">
+                                         <div><p className="text-xs text-stone-500 mb-1">Username Login</p><p className="font-bold text-stone-800">{m.username}</p></div>
+                                         <div><p className="text-xs text-stone-500 mb-1">Nomor Induk Kependudukan (NIK)</p><p className="font-bold text-stone-800 font-mono">{m.identity || '-'}</p></div>
+                                         <div><p className="text-xs text-stone-500 mb-1">Jenis Kelamin</p><p className="font-bold text-stone-800">{m.gender || '-'}</p></div>
+                                         <div><p className="text-xs text-stone-500 mb-1">Tempat, Tanggal Lahir</p><p className="font-bold text-stone-800">{m.birthPlace || '-'}, {m.birthDate || '-'}</p></div>
+                                         <div className="sm:col-span-2"><p className="text-xs text-stone-500 mb-1">Alamat Domisili</p><p className="font-bold text-stone-800">{m.address || '-'}</p></div>
+                                         {m.socialMedia && <div className="sm:col-span-2"><p className="text-xs text-stone-500 mb-1">Akun Sosial Media</p><p className="font-bold text-blue-600">{m.socialMedia}</p></div>}
+                                      </div>
+                                  )}
+                               </div>
+
+                               <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm flex flex-col gap-4">
+                                  <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-2 border-b border-stone-100 pb-3 flex items-center gap-2"><ImageIcon className="w-4 h-4"/> Dokumen KTP</h5>
+                                  {m.ktpUrl ? (
+                                     <a href={m.ktpUrl} target="_blank" rel="noopener noreferrer" className="block relative group overflow-hidden rounded-xl border border-stone-200 shadow-sm flex-grow">
+                                       <img src={m.ktpUrl} alt="KTP" className="w-full h-32 md:h-full object-cover absolute inset-0 group-hover:scale-105 transition-transform duration-500" />
+                                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                         <span className="text-white text-xs font-bold px-3 py-1.5 border border-white rounded-lg backdrop-blur-sm">Lihat Penuh</span>
+                                       </div>
+                                     </a>
+                                  ) : (
+                                     <div className="w-full h-32 md:h-full min-h-[120px] bg-stone-50 border border-dashed border-stone-300 rounded-xl flex items-center justify-center text-stone-400 text-xs">Dokumen Tidak Tersedia</div>
+                                  )}
+                               </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+              )})}
             </tbody>
           </table>
         )}
@@ -1987,11 +2209,24 @@ const AdminSystemSettings = () => {
   const updateSocial = (index, field, val) => { const newS = [...bConfig.socialMedia]; newS[index][field] = val; setBConfig({...bConfig, socialMedia: newS}); };
   
   const handleLogoUpload = async (e) => { 
-    const file = e.target.files[0]; if (!file) return; setIsUploading(true);
+    const file = e.target.files[0]; 
+    if (!file) return; 
+
+    if (file.type !== 'image/png' && file.type !== 'image/svg+xml') {
+      showToast('Gagal: Logo WAJIB berformat PNG Transparan!', 'error');
+      return;
+    }
+
+    setIsUploading(true);
     showToast('Mengkompresi gambar logo...', 'info');
-    const compressed = await compressImage(file); const url = await uploadImageToServer(compressed);
-    if (url) { setBConfig({...bConfig, logoUrl: url}); showToast('Logo berhasil disiapkan.', 'success'); } 
-    else { showToast('Gagal upload ke server gambar.', 'error'); }
+    const compressed = await compressImage(file, true); 
+    const url = await uploadImageToServer(compressed);
+    if (url) { 
+      setBConfig({...bConfig, logoUrl: url}); 
+      showToast('Logo berhasil disiapkan.', 'success'); 
+    } else { 
+      showToast('Gagal upload ke server gambar.', 'error'); 
+    }
     setIsUploading(false);
   };
 
@@ -2009,9 +2244,10 @@ const AdminSystemSettings = () => {
             <div className="md:col-span-2 flex flex-col sm:flex-row items-start sm:items-center gap-6 mb-2">
               {bConfig.logoUrl ? <img src={bConfig.logoUrl} className="w-24 h-24 object-contain border border-stone-200 rounded-2xl shadow-sm bg-stone-50 p-2" alt="Logo" /> : <div className="w-24 h-24 bg-stone-100 border border-stone-200 rounded-2xl flex items-center justify-center shadow-sm"><ImageIcon className="w-8 h-8 text-stone-400"/></div>}
               <div>
-                <label className="block text-sm font-bold text-stone-700 mb-2">Logo Perusahaan (Gambar/PNG)</label>
+                <label className="block text-sm font-bold text-stone-700 mb-2">Logo Perusahaan (Wajib PNG Transparan)</label>
+                <p className="text-[10px] text-stone-500 mb-2">PENTING: Jangan gunakan gambar PNG palsu dari Google yang ada kotak-kotaknya.</p>
                 <div className="flex flex-wrap items-center gap-3">
-                  <label className="flex items-center justify-center px-5 py-3 border border-stone-300 rounded-xl cursor-pointer hover:bg-stone-50 text-sm font-bold text-stone-600 bg-white shadow-sm w-max transition-colors"><Upload className="w-4 h-4 mr-2" /> {isUploading ? 'Uploading...' : 'Upload Foto Logo'}<input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" /></label>
+                  <label className="flex items-center justify-center px-5 py-3 border border-stone-300 rounded-xl cursor-pointer hover:bg-stone-50 text-sm font-bold text-stone-600 bg-white shadow-sm w-max transition-colors"><Upload className="w-4 h-4 mr-2" /> {isUploading ? 'Uploading...' : 'Upload Logo (.png)'}<input type="file" accept=".png, image/png, image/svg+xml" onChange={handleLogoUpload} className="hidden" /></label>
                   {bConfig.logoUrl && <button type="button" onClick={() => setBConfig({...bConfig, logoUrl: ''})} className="px-5 py-3 rounded-xl bg-red-50 text-red-600 font-bold text-sm hover:bg-red-100 transition-colors">Hapus Logo</button>}
                 </div>
               </div>
