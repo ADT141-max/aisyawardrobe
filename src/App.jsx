@@ -172,65 +172,40 @@ const AppStateProvider = ({ children }) => {
     link.href = `https://fonts.googleapis.com/css2?family=${font.replace(/ /g, '+')}:wght@400;700&display=swap`;
   }, [db.brandConfig?.logoFont]);
 
-  // 2. Dynamic PWA (Progressive Web App) Injector Sayang
+  // 2. Dynamic PWA (Progressive Web App) Injector
   useEffect(() => {
     if (!db.brandConfig) return;
     const { appName, themeColor, logoUrl } = db.brandConfig;
     
-    // Fungsi pembuat Meta Tag
     const setMeta = (name, content) => {
       let meta = document.querySelector(`meta[name="${name}"]`);
-      if (!meta) { 
-         meta = document.createElement('meta'); 
-         meta.name = name; 
-         document.head.appendChild(meta); 
-      }
+      if (!meta) { meta = document.createElement('meta'); meta.name = name; document.head.appendChild(meta); }
       meta.content = content;
     };
 
-    // Meta Tags ajaib untuk iOS & PWA
     setMeta('apple-mobile-web-app-capable', 'yes');
     setMeta('apple-mobile-web-app-status-bar-style', 'black-translucent');
     setMeta('apple-mobile-web-app-title', appName || 'Aisya Wardrobe');
     setMeta('theme-color', themeColor === 'slate' ? '#1e293b' : '#fafaf9');
 
-    // Suntikkan Ikon Layar Utama (Apple Touch Icon)
     if (logoUrl) {
       let linkIcon = document.querySelector('link[rel="apple-touch-icon"]');
-      if (!linkIcon) { 
-         linkIcon = document.createElement('link'); 
-         linkIcon.rel = 'apple-touch-icon'; 
-         document.head.appendChild(linkIcon); 
-      }
+      if (!linkIcon) { linkIcon = document.createElement('link'); linkIcon.rel = 'apple-touch-icon'; document.head.appendChild(linkIcon); }
       linkIcon.href = logoUrl;
     }
 
-    // Bangun file Manifest buatan (Blob) agar bisa di-install
     const manifest = {
-      name: appName || 'Aisya Wardrobe', 
-      short_name: appName || 'Aisya',
-      display: 'standalone', 
-      start_url: '/', 
-      background_color: '#fafaf9', 
-      theme_color: '#1c1917',
-      icons: logoUrl ? [
-        { src: logoUrl, sizes: '192x192', type: 'image/png' }, 
-        { src: logoUrl, sizes: '512x512', type: 'image/png' }
-      ] : []
+      name: appName || 'Aisya Wardrobe', short_name: appName || 'Aisya', display: 'standalone', start_url: '/', background_color: '#fafaf9', theme_color: '#1c1917',
+      icons: logoUrl ? [{ src: logoUrl, sizes: '192x192', type: 'image/png' }, { src: logoUrl, sizes: '512x512', type: 'image/png' }] : []
     };
 
     const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
     const manifestUrl = URL.createObjectURL(manifestBlob);
     
     let manifestLink = document.querySelector('link[rel="manifest"]');
-    if (!manifestLink) { 
-       manifestLink = document.createElement('link'); 
-       manifestLink.rel = 'manifest'; 
-       document.head.appendChild(manifestLink); 
-    }
+    if (!manifestLink) { manifestLink = document.createElement('link'); manifestLink.rel = 'manifest'; document.head.appendChild(manifestLink); }
     manifestLink.href = manifestUrl;
 
-    // Pembersihan memori saat komponen di-unmount
     return () => URL.revokeObjectURL(manifestUrl);
   }, [db.brandConfig?.appName, db.brandConfig?.logoUrl, db.brandConfig?.themeColor]);
 
@@ -300,16 +275,8 @@ const AppStateProvider = ({ children }) => {
   };
   const memberLogout = () => { setLoggedInMember(null); setView('dashboard'); showToast('Berhasil keluar akun.'); };
 
-  const requireApproval = (actionType, payload, successMsg) => {
-    if (!loggedInUser) return false;
-    if (['developer', 'owner'].includes(loggedInUser.role) || (loggedInUser.role === 'manager' && actionType !== 'UPDATE_USER')) { executeAction(actionType, payload); showToast(successMsg); return true; }
-    const newApp = { id: `APP-${Date.now()}`, actionType, payload, requestedBy: loggedInUser.name, requesterRole: loggedInUser.role, date: new Date().toLocaleString() };
-    saveToDatabase({ ...db, approvals: [newApp, ...(db.approvals || [])], logs: createLog(db, 'Persetujuan', `Mengajukan: ${actionType}`) });
-    showToast('Tindakan butuh persetujuan Manager/Owner', 'info'); return false;
-  };
-
-  const executeAction = (actionType, payload) => {
-    let newDb = { ...db }; let actStr = ''; let detStr = '';
+  const applyActionToDb = (currentDb, actionType, payload) => {
+    let newDb = { ...currentDb }; let actStr = ''; let detStr = '';
     switch (actionType) {
       case 'ADD_PRODUCT': newDb.products = [payload, ...(newDb.products||[])]; actStr='Inventaris'; detStr=`Tambah: ${payload.name}`; break;
       case 'EDIT_PRODUCT': newDb.products = (newDb.products||[]).map(p => p.id === payload.id ? payload : p); actStr='Inventaris'; detStr=`Edit: ${payload.id}`; break;
@@ -338,13 +305,36 @@ const AppStateProvider = ({ children }) => {
       case 'DELETE_PRIZE': newDb.prizes = (newDb.prizes||[]).filter(p => p.id !== payload.id); actStr='Hadiah'; detStr=`Hapus: ${payload.id}`; break;
       default: break;
     }
-    if(actStr) { newDb.logs = createLog(newDb, actStr, detStr); } saveToDatabase(newDb);
+    if(actStr) { newDb.logs = createLog(newDb, actStr, detStr); } 
+    return newDb;
+  };
+
+  const requireApproval = (actionType, payload, successMsg) => {
+    if (!loggedInUser) return false;
+    if (['developer', 'owner'].includes(loggedInUser.role) || (loggedInUser.role === 'manager' && actionType !== 'UPDATE_USER')) { 
+      const newDb = applyActionToDb(db, actionType, payload);
+      saveToDatabase(newDb); 
+      showToast(successMsg); 
+      return true; 
+    }
+    const newApp = { id: `APP-${Date.now()}`, actionType, payload, requestedBy: loggedInUser.name, requesterRole: loggedInUser.role, date: new Date().toLocaleString() };
+    saveToDatabase({ ...db, approvals: [newApp, ...(db.approvals || [])], logs: createLog(db, 'Persetujuan', `Mengajukan: ${actionType}`) });
+    showToast('Tindakan butuh persetujuan Manager/Owner', 'info'); return false;
   };
 
   const handleApproval = (id, action) => {
     const req = (db.approvals||[]).find(a => a.id === id); if (!req) return;
-    if (action === 'approve') { executeAction(req.actionType, req.payload); showToast('Disetujui'); } else { showToast('Ditolak', 'info'); }
-    saveToDatabase({ ...db, approvals: db.approvals.filter(a => a.id !== id), logs: createLog(db, 'Persetujuan', `${action === 'approve' ? 'Setuju' : 'Tolak'}: ${req.actionType}`) });
+    let newDb = { ...db, approvals: db.approvals.filter(a => a.id !== id) };
+    
+    if (action === 'approve') { 
+      newDb = applyActionToDb(newDb, req.actionType, req.payload);
+      newDb.logs = createLog(newDb, 'Persetujuan', `Setuju: ${req.actionType}`);
+      showToast('Disetujui'); 
+    } else { 
+      newDb.logs = createLog(newDb, 'Persetujuan', `Tolak: ${req.actionType}`);
+      showToast('Ditolak', 'info'); 
+    }
+    saveToDatabase(newDb);
   };
 
   const getAvailableStock = (productId) => {
@@ -453,7 +443,7 @@ const SplashScreen = () => {
     <div className="fixed inset-0 bg-stone-900 flex flex-col items-center justify-center z-[9999]">
       <div className="w-24 h-24 bg-gradient-to-tr from-amber-500 to-amber-700 rounded-full flex items-center justify-center mb-6 shadow-[0_0_40px_rgba(212,175,55,0.4)] animate-pulse">
         {db?.brandConfig?.logoUrl ? (
-          <img src={db.brandConfig.logoUrl} className="w-16 h-16 object-contain filter drop-shadow-md" alt="Logo" />
+          <img src={db.brandConfig.logoUrl} className="w-14 h-14 object-contain filter brightness-0 invert" alt="Logo" />
         ) : db?.brandConfig?.appIcon ? (
           <span className="text-4xl">{db.brandConfig.appIcon}</span>
         ) : (
@@ -2326,6 +2316,7 @@ const AdminSystemSettings = () => {
             <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Biografi Perusahaan</label><textarea rows="3" value={bConfig.companyBio} onChange={e=>setBConfig({...bConfig, companyBio: e.target.value})} className="w-full px-5 py-4 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
             <div className="md:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Email Bisnis</label><input type="email" value={bConfig.companyEmail} onChange={e=>setBConfig({...bConfig, companyEmail: e.target.value})} className="w-full px-5 py-3.5 bg-stone-50 border border-stone-200 rounded-xl outline-none" /></div>
             
+            {/* PENGATURAN BENTO GRID */}
             <div className="md:col-span-2 bg-amber-50 p-6 rounded-2xl border border-amber-200 mt-4">
                <h3 className="font-bold text-stone-800 flex items-center gap-2 mb-2"><Grid className="w-5 h-5 text-amber-600"/> Highlight Beranda (Bento Mosaik)</h3>
                <p className="text-sm text-stone-600 mb-5">Pilih 3 kategori produk untuk ditampilkan secara elegan di halaman beranda.</p>
@@ -2451,7 +2442,7 @@ const AdminDeveloperPanel = () => {
             <div className="bg-[#1e293b] p-6 md:p-8 rounded-2xl border border-emerald-500/20 shadow-inner">
                <h3 className="text-base font-bold mb-6 flex items-center gap-3 text-emerald-300"><UploadCloud className="w-5 h-5"/> VERSI SISTEM APLIKASI</h3>
                <div className="space-y-4">
-                  <div className="px-5 py-4 bg-[#0f172a] rounded-xl flex justify-between items-center border border-emerald-900/50"><span className="text-sm font-bold text-emerald-500">Versi Build Aktif</span><span className="text-xs bg-emerald-900 text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-700">v8.0.0-PWA</span></div>
+                  <div className="px-5 py-4 bg-[#0f172a] rounded-xl flex justify-between items-center border border-emerald-900/50"><span className="text-sm font-bold text-emerald-500">Versi Build Aktif</span><span className="text-xs bg-emerald-900 text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-700">v8.1.0-STABLE</span></div>
                   <button onClick={() => showToast('Mem-bypass limit HTTP...', 'success')} className="w-full py-4 bg-emerald-600 text-white hover:bg-emerald-500 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-emerald-900/50">Ping Git Repository Server</button>
                </div>
             </div>
