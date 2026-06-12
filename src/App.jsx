@@ -9,7 +9,8 @@ import {
 } from 'lucide-react';
 
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
+// MENGAKTIFKAN OFFLINE PERSISTENCE UNTUK MENGHEMAT BIAYA SERVER (READS) 90%
+import { getFirestore, doc, setDoc, onSnapshot, enableIndexedDbPersistence } from "firebase/firestore";
 
 // ============================================================================
 // KONFIGURASI FIREBASE & SERVER GAMBAR
@@ -26,6 +27,12 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const dbFirestore = getFirestore(app);
+
+// Optimasi Tagihan Server: Simpan data di Cache Lokal HP/Laptop
+enableIndexedDbPersistence(dbFirestore).catch((err) => {
+  console.warn("Fitur penghematan cache lokal gagal dimuat:", err.code);
+});
+
 const stateDocRef = doc(dbFirestore, "aisya_database", "main_state");
 
 const IMGBB_API_KEY = "aab30f3a1714c46f739b7d56dd87a5b3"; 
@@ -163,7 +170,6 @@ const AppStateProvider = ({ children }) => {
   };
   const cTheme = themeColors[db.brandConfig?.themeColor] || themeColors.rose;
 
-  // 1. Dynamic Font Loader
   useEffect(() => {
     const font = db.brandConfig?.logoFont || 'Playfair Display';
     const linkId = 'custom-logo-font';
@@ -172,7 +178,7 @@ const AppStateProvider = ({ children }) => {
     link.href = `https://fonts.googleapis.com/css2?family=${font.replace(/ /g, '+')}:wght@400;700&display=swap`;
   }, [db.brandConfig?.logoFont]);
 
-  // 2. Dynamic PWA (Progressive Web App) Injector
+  // Dynamic PWA Injector
   useEffect(() => {
     if (!db.brandConfig) return;
     const { appName, themeColor, logoUrl } = db.brandConfig;
@@ -258,7 +264,6 @@ const AppStateProvider = ({ children }) => {
        if (!isDbLoading) { saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Login Admin', user.name) }); }
        return true; 
     }
-    
     if (username === 'dev' && password === 'dev') {
        setLoggedInUser({ id: 'U0', username: 'dev', password: 'dev', name: 'Developer System', role: 'developer' }); setView('admin'); 
        if (!isDbLoading) { saveToDatabase({ ...db, logs: createLog(db, 'Otorisasi', 'Bypass Login Developer', 'Developer') }); }
@@ -337,10 +342,23 @@ const AppStateProvider = ({ children }) => {
     saveToDatabase(newDb);
   };
 
-  const getAvailableStock = (productId) => {
-    const product = (db.products||[]).find(p => p.id === productId); if (!product || product.status === 'Maintenance') return 0;
-    const rented = (db.orders||[]).filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status)).reduce((total, order) => { const item = order.items.find(i => i.id === productId); return total + (item ? item.quantity : 0); }, 0);
-    return product.totalStock - rented;
+  // MENGHITUNG STOK BERDASARKAN UKURAN SPESIFIK
+  const getAvailableStock = (productId, sizeName = null) => {
+    const product = (db.products||[]).find(p => p.id === productId); 
+    if (!product || product.status === 'Maintenance') return 0;
+    
+    let baseStock = 0;
+    if (sizeName && product.sizes) {
+       baseStock = parseInt(product.sizes[sizeName]) || 0;
+    } else {
+       baseStock = product.totalStock || 0;
+    }
+
+    const rented = (db.orders||[]).filter(o => ['Menunggu Konfirmasi', 'Siap Diambil', 'Sedang Disewa'].includes(o.status)).reduce((total, order) => { 
+       const item = order.items.find(i => i.id === productId && (!sizeName || i.size === sizeName)); 
+       return total + (item ? item.quantity : 0); 
+    }, 0);
+    return Math.max(0, baseStock - rented);
   };
 
   const toggleWishlist = (productId) => {
@@ -364,7 +382,7 @@ const AppStateProvider = ({ children }) => {
     const newOrder = {
       id: newOrderId, date: new Date().toISOString().split('T')[0],
       customer: { name: formData.name, phone: formData.phone, identity: formData.identity, ktpUrl: formData.ktpUrl },
-      items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, discountPrice: c.discountPrice || 0, deposit: c.deposit||0, quantity: c.quantity, images: c.images||[] })),
+      items: cart.map(c => ({ id: c.id, name: c.name, size: c.size, price: c.price, discountPrice: c.discountPrice || 0, deposit: c.deposit||0, quantity: c.quantity, images: c.images||[] })),
       duration, startDate: formData.startDate, endDate: formData.endDate, totalSewa, totalDeposit, total: totalBiaya, status: 'Menunggu Konfirmasi', memberId: loggedInMember?.id || null, earnedPoints, denda: 0
     };
     
@@ -377,7 +395,8 @@ const AppStateProvider = ({ children }) => {
 
     if (isWA) {
       const waNumber = db.brandConfig?.socialMedia?.find(s => s.type === 'WhatsApp' || s.type === 'WA')?.value || '';
-      const text = `Halo Admin ${db.brandConfig.appName}, saya ingin menyewa pakaian.\n\n*ID Pesanan:* ${newOrderId}\n*Nama:* ${formData.name}\n*Tgl Sewa:* ${formData.startDate} (${duration} Hari)\n\n*Total Biaya (Inc. Deposit):* ${formatRupiah(totalBiaya)}\n\nMohon konfirmasinya. Terima kasih!`;
+      const itemsListText = cart.map(c => `- ${c.quantity}x ${c.name} (Ukuran: ${c.size})`).join('\n');
+      const text = `Halo Admin ${db.brandConfig.appName}, saya ingin menyewa pakaian.\n\n*ID Pesanan:* ${newOrderId}\n*Nama:* ${formData.name}\n*Tgl Sewa:* ${formData.startDate} (${duration} Hari)\n\n*Daftar Pakaian:*\n${itemsListText}\n\n*Total Biaya (Inc. Deposit):* ${formatRupiah(totalBiaya)}\n\nMohon konfirmasinya. Terima kasih!`;
       window.open(`https://wa.me/${waNumber.replace(/\D/g,'')}?text=${encodeURIComponent(text)}`, '_blank');
     }
   };
@@ -389,7 +408,7 @@ const AppStateProvider = ({ children }) => {
       <style>body { font-family: sans-serif; padding: 40px; } .header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; } .title { font-size: 24px; font-family: '${db.brandConfig.logoFont}', serif; font-weight: bold; } .row { display: flex; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px solid #fafafa; padding-bottom: 10px; } .total { font-size: 18px; font-weight: bold; border-top: 2px solid #333; padding-top: 15px; margin-top: 15px; } table { width: 100%; border-collapse: collapse; margin-bottom: 30px; } th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }</style></head><body>
       <div class="header"><h1 class="title">${db.brandConfig.appName}</h1><p>INVOICE PENYEWAAN</p></div>
       <div class="row"><span>ID Pesanan:</span> <strong>${order.id}</strong></div><div class="row"><span>Pelanggan:</span> <strong>${order.customer.name} (${order.customer.phone})</strong></div><div class="row"><span>Tanggal Sewa:</span> <strong>${order.startDate} s/d ${order.endDate} (${order.duration} Hari)</strong></div>
-      <table><tr><th>Barang</th><th>Qty</th><th>Harga/Hr</th><th>Deposit</th></tr>${order.items.map(i => { const effPrice = i.discountPrice > 0 ? i.discountPrice : i.price; return `<tr><td>${i.name}</td><td>${i.quantity}</td><td>${formatRupiah(effPrice)}</td><td>${formatRupiah(i.deposit)}</td></tr>`; }).join('')}</table>
+      <table><tr><th>Barang</th><th>Ukuran</th><th>Qty</th><th>Harga/Hr</th><th>Deposit</th></tr>${order.items.map(i => { const effPrice = i.discountPrice > 0 ? i.discountPrice : i.price; return `<tr><td>${i.name}</td><td>${i.size || '-'}</td><td>${i.quantity}</td><td>${formatRupiah(effPrice)}</td><td>${formatRupiah(i.deposit)}</td></tr>`; }).join('')}</table>
       <div class="row"><span>Total Biaya Sewa:</span> <span>${formatRupiah(order.totalSewa)}</span></div><div class="row"><span>Total Uang Jaminan:</span> <span>${formatRupiah(order.totalDeposit)}</span></div><div class="row total"><span>TOTAL KESELURUHAN:</span> <span>${formatRupiah(order.total)}</span></div>
       ${order.status === 'Selesai' ? `<div class="row"><span>Denda Keterlambatan/Kerusakan:</span> <span style="color:red">-${formatRupiah(order.denda)}</span></div><div class="row total"><span>DEPOSIT DIKEMBALIKAN:</span> <span>${formatRupiah(order.totalRefundDeposit)}</span></div>` : ''}
       <div style="margin-top: 50px; text-align: center; font-size: 12px; color: #888;">Terima kasih telah mempercayakan momen spesial Anda pada ${db.brandConfig.appName}.<br/>Barang sewaan wajib dikembalikan tepat waktu untuk menghindari denda.</div>
@@ -423,9 +442,21 @@ const AppStateProvider = ({ children }) => {
     view, setView, cart, setCart, loggedInUser, loggedInMember, cTheme,
     login, logout, memberLogin, memberLogout, submitMemberRegistration, redeemPrize,
     getAvailableStock, toggleWishlist, uploadImageToServer, compressImage, setBentoCategory,
-    addToCart: (p) => { setCart([...cart, { ...p, quantity: 1 }]); showToast(`${p.name} masuk keranjang.`); },
-    removeFromCart: (id) => setCart(cart.filter(i => i.id !== id)),
-    updateCartQuantity: (id, d) => setCart(cart.map(i => i.id === id && i.quantity + d > 0 ? { ...i, quantity: i.quantity + d } : i)),
+    // Modifikasi fungsi tambah ke keranjang agar mendeteksi ukuran baju
+    addToCart: (p, sizeName) => { 
+      if (!sizeName) { showToast("Pilih ukuran pakaian terlebih dahulu!", "error"); return; }
+      const cartId = `${p.id}-${sizeName}`;
+      const existing = cart.find(i => i.cartId === cartId);
+      if (existing) {
+         setCart(cart.map(i => i.cartId === cartId ? { ...i, quantity: i.quantity + 1 } : i));
+         showToast(`Kuantitas ${p.name} ditambah.`);
+      } else {
+         setCart([...cart, { ...p, cartId, size: sizeName, quantity: 1 }]); 
+         showToast(`${p.name} (Ukuran ${sizeName}) masuk keranjang.`); 
+      }
+    },
+    removeFromCart: (cartId) => setCart(cart.filter(i => i.cartId !== cartId)),
+    updateCartQuantity: (cartId, d) => setCart(cart.map(i => i.cartId === cartId && i.quantity + d > 0 ? { ...i, quantity: i.quantity + d } : i)),
     processOrder, requireApproval, handleApproval, printInvoice,
     exportData: () => { const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(db)); const dl = document.createElement('a'); dl.href = dataStr; dl.download = `aisya_backup_${Date.now()}.json`; dl.click(); },
     importData: (json) => { try { setDb(JSON.parse(json)); showToast('Restore sukses!'); } catch(e) { showToast('Gagal parse JSON', 'error'); } }
@@ -601,7 +632,7 @@ const BentoCategoryBox = ({ categoryName, className }) => {
   return (
     <div onClick={() => setView('catalog')} className={`relative overflow-hidden rounded-3xl cursor-pointer group shadow-sm hover:shadow-xl transition-all duration-500 ${className}`}>
       {categoryImages.map((img, idx) => (
-         <div key={idx} className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 group-hover:scale-110 ease-in-out ${idx === currentIdx ? 'opacity-100' : 'opacity-0'}`} style={{ backgroundImage: `url(${img})` }}></div>
+         <div key={`bento-img-${idx}`} className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 group-hover:scale-110 ease-in-out ${idx === currentIdx ? 'opacity-100' : 'opacity-0'}`} style={{ backgroundImage: `url(${img})` }}></div>
       ))}
       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
       
@@ -624,10 +655,8 @@ const BentoCategoryBox = ({ categoryName, className }) => {
 // KOMPONEN CARD PRODUK
 // ============================================================================
 const ProductCardItem = ({ product, openDetail }) => {
-  const { cart, addToCart, getAvailableStock, cTheme, loggedInMember, toggleWishlist } = useContext(AppStateContext);
+  const { getAvailableStock, cTheme, loggedInMember, toggleWishlist } = useContext(AppStateContext);
   const avail = getAvailableStock(product.id);
-  const inCart = cart.find(i => i.id === product.id)?.quantity || 0;
-  const canAdd = avail > inCart;
   const isWished = loggedInMember?.wishlist?.includes(product.id);
   const isPromo = product.discountPrice > 0;
   const effPrice = isPromo ? product.discountPrice : product.price;
@@ -642,7 +671,7 @@ const ProductCardItem = ({ product, openDetail }) => {
         {product.images?.length > 1 ? (
           <div className="flex overflow-x-auto snap-x snap-mandatory h-full w-full no-scrollbar" onClick={e => e.stopPropagation()}>
             {product.images.map((img, idx) => (
-              <img key={idx} src={img} alt={`${product.name} - Gambar ${idx + 1}`} className="w-full h-full object-cover shrink-0 snap-center lg:group-hover:scale-110 transition-transform duration-700" />
+              <img key={`pc-img-${idx}`} src={img} alt={`${product.name} - Gambar ${idx + 1}`} className="w-full h-full object-cover shrink-0 snap-center lg:group-hover:scale-110 transition-transform duration-700" />
             ))}
           </div>
         ) : (
@@ -662,7 +691,15 @@ const ProductCardItem = ({ product, openDetail }) => {
            <h3 className="font-serif font-bold text-xl text-stone-900 leading-tight group-hover:text-amber-600 transition-colors pr-2">{product.name}</h3>
         </div>
         
-        <p className="text-[10px] text-stone-400 font-mono bg-stone-50 px-2 py-1 rounded w-max mb-4">{product.id}</p>
+        <div className="flex gap-2 items-center mb-4">
+          <p className="text-[10px] text-stone-400 font-mono bg-stone-50 px-2 py-1 rounded w-max">{product.id}</p>
+          <div className="flex gap-1 flex-wrap max-w-[60%]">
+            {Object.keys(product.sizes || {'All Size': product.totalStock}).map(sz => (
+              <span key={`pc-sz-${sz}`} className="text-[9px] font-bold bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded border border-stone-200">{sz}</span>
+            ))}
+          </div>
+        </div>
+
         <div className="mb-4">
           {isPromo ? (
             <div className="flex flex-col">
@@ -678,8 +715,8 @@ const ProductCardItem = ({ product, openDetail }) => {
         <div className="flex flex-col flex-grow"><p className={`text-sm text-stone-500 font-light flex-grow mb-6 line-clamp-2`}>{product.desc}</p></div>
 
         <div className="mt-auto pt-5 border-t border-stone-100 flex items-center justify-between">
-          <span className="text-sm text-stone-500 font-medium">Sisa: {avail}</span>
-          <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} disabled={!canAdd} className={`px-5 py-2.5 rounded-full font-bold transition-all active:scale-95 flex items-center gap-2 ${canAdd ? `${cTheme.bg} text-white shadow-md hover:shadow-lg` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}><ShoppingCart className="w-4 h-4" /> Sewa</button>
+          <span className="text-sm text-stone-500 font-medium">Sisa: {avail} Pcs</span>
+          <button className={`px-5 py-2.5 rounded-full font-bold transition-all active:scale-95 flex items-center gap-2 ${avail > 0 ? `${cTheme.bg} text-white shadow-md hover:shadow-lg` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}>Detail & Sewa</button>
         </div>
       </div>
     </div>
@@ -691,9 +728,10 @@ const ProductCardItem = ({ product, openDetail }) => {
 // VIEWS (DASHBOARD, CATALOG, DLL)
 // ============================================================================
 const DashboardView = () => {
-  const { setView, db, cTheme } = useContext(AppStateContext);
+  const { setView, db, cTheme, getAvailableStock, cart, addToCart, toggleWishlist, loggedInMember } = useContext(AppStateContext);
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [currentImgIdx, setCurrentImgIdx] = useState(0);
+  const [selectedSize, setSelectedSize] = useState('');
 
   const promoProducts = useMemo(() => { return (db.products||[]).filter(p => p.discountPrice > 0 && p.status !== 'Maintenance').slice(0, 4); }, [db.products]);
   const bestSellerIds = useMemo(() => {
@@ -706,11 +744,17 @@ const DashboardView = () => {
   const latestProducts = useMemo(() => { return (db.products||[]).filter(p => p.status !== 'Maintenance').slice(-4).reverse(); }, [db.products]);
   const displayProducts = bestSellers.length > 0 ? bestSellers : latestProducts;
 
-  const openDetail = (product) => { setSelectedDetail(product); setCurrentImgIdx(0); };
+  const openDetail = (product) => { setSelectedDetail(product); setCurrentImgIdx(0); setSelectedSize(''); };
   const closeDetail = () => setSelectedDetail(null);
 
   const renderDetailModal = () => {
     if (!selectedDetail) return null;
+    const hasDiscount = selectedDetail.discountPrice > 0;
+    const sizesObj = selectedDetail.sizes || { 'All Size': selectedDetail.totalStock };
+    const availForSelected = selectedSize ? getAvailableStock(selectedDetail.id, selectedSize) : 0;
+    const inCartForSelected = selectedSize ? (cart.find(i => i.cartId === `${selectedDetail.id}-${selectedSize}`)?.quantity || 0) : 0;
+    const canAddSelected = selectedSize && (availForSelected > inCartForSelected);
+
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-stone-900/70 backdrop-blur-sm" onClick={closeDetail}>
            <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row shadow-2xl relative animate-fade-in-down" onClick={e => e.stopPropagation()}>
@@ -721,7 +765,7 @@ const DashboardView = () => {
                       <button onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(prev => prev === 0 ? selectedDetail.images.length - 1 : prev - 1); }} className="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-white/70 hover:bg-white rounded-full text-stone-800 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"><ChevronLeft className="w-5 h-5"/></button>
                       <button onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(prev => prev === selectedDetail.images.length - 1 ? 0 : prev + 1); }} className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-white/70 hover:bg-white rounded-full text-stone-800 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"><ChevronRight className="w-5 h-5"/></button>
                       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 bg-stone-900/30 px-3 py-1.5 rounded-full backdrop-blur-sm">
-                         {selectedDetail.images.map((_, idx) => <button key={idx} onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(idx); }} className={`w-2 h-2 rounded-full transition-all ${idx === currentImgIdx ? 'bg-white w-4' : 'bg-white/50 hover:bg-white/80'}`} /> )}
+                         {selectedDetail.images.map((_, idx) => <button key={`mdl-img-${idx}`} onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(idx); }} className={`w-2 h-2 rounded-full transition-all ${idx === currentImgIdx ? 'bg-white w-4' : 'bg-white/50 hover:bg-white/80'}`} /> )}
                       </div>
                     </>
                  )}
@@ -737,19 +781,46 @@ const DashboardView = () => {
                   <p className="text-sm font-mono text-stone-400 mb-6">{selectedDetail.id}</p>
                   
                   <div className="mb-8 bg-stone-50 p-5 rounded-2xl border border-stone-100 relative">
-                      {selectedDetail.discountPrice > 0 && <span className="absolute -top-3 -right-3 bg-red-600 text-white font-bold px-4 py-1.5 rounded-full shadow-lg transform rotate-12">SALE</span>}
-                      {selectedDetail.discountPrice > 0 ? (
-                        <>
-                          <p className="text-sm text-stone-400 line-through mb-1">Normal: {formatRupiah(selectedDetail.price)}</p>
-                          <p className="text-red-600 font-bold text-3xl mb-2">{formatRupiah(selectedDetail.discountPrice)} <span className="text-sm font-light text-stone-500">/ hari</span></p>
-                        </>
+                      {hasDiscount && <span className="absolute -top-3 -right-3 bg-red-600 text-white font-bold px-4 py-1.5 rounded-full shadow-lg transform rotate-12">SALE</span>}
+                      {hasDiscount ? (
+                        <><p className="text-sm text-stone-400 line-through mb-1">Normal: {formatRupiah(selectedDetail.price)}</p><p className="text-red-600 font-bold text-3xl mb-2">{formatRupiah(selectedDetail.discountPrice)} <span className="text-sm font-light text-stone-500">/ hari</span></p></>
                       ) : (<p className={`${cTheme.text} font-bold text-3xl mb-2`}>{formatRupiah(selectedDetail.price)} <span className="text-sm font-light text-stone-500">/ hari</span></p>)}
                       {selectedDetail.deposit > 0 && <p className="text-xs font-bold text-amber-600 bg-amber-100/50 inline-block px-3 py-1.5 rounded-lg border border-amber-200">+ Deposit Jaminan: {formatRupiah(selectedDetail.deposit)}</p>}
                   </div>
 
+                  <div className="mb-6">
+                     <h4 className="text-sm font-bold text-stone-800 uppercase tracking-wider mb-3">Pilih Ukuran</h4>
+                     <div className="flex flex-wrap gap-3">
+                       {Object.entries(sizesObj).map(([sz, qty]) => {
+                          const szAvail = getAvailableStock(selectedDetail.id, sz);
+                          const isSel = selectedSize === sz;
+                          const isOut = szAvail <= 0;
+                          return (
+                            <button key={`mdl-sz-${sz}`} disabled={isOut} onClick={() => setSelectedSize(sz)} className={`px-5 py-2.5 rounded-xl text-sm font-bold border transition-all ${isSel ? cTheme.bg + ' text-white border-transparent shadow-md' : isOut ? 'bg-stone-100 text-stone-300 border-stone-200 cursor-not-allowed' : 'bg-white text-stone-600 border-stone-300 hover:border-stone-500'}`}>
+                              {sz} {isOut && <span className="block text-[10px] font-normal leading-none mt-1">Habis</span>}
+                            </button>
+                          )
+                       })}
+                     </div>
+                  </div>
+
                   <div className="mb-8"><h4 className="text-sm font-bold text-stone-800 uppercase tracking-wider mb-3 border-b border-stone-100 pb-2">Deskripsi Pakaian</h4><p className="text-base text-stone-600 leading-relaxed font-light whitespace-pre-line">{selectedDetail.desc}</p></div>
+                  
                   <div className="mt-auto pt-6 border-t border-stone-100 space-y-4">
-                      <button onClick={() => { closeDetail(); setView('catalog'); }} className="w-full bg-stone-900 hover:bg-black text-white text-lg font-bold py-4 rounded-xl transition-colors shadow-lg flex justify-center items-center">Lihat Lebih Detail di Katalog</button>
+                      {selectedSize && (
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-stone-500 font-medium">Stok Ukuran {selectedSize}:</span>
+                            <span className={`font-bold px-4 py-1.5 rounded-lg text-sm ${availForSelected > 0 ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>{availForSelected} Pcs Tersedia</span>
+                        </div>
+                      )}
+                      <div className="flex gap-3">
+                          <button onClick={(e) => { e.stopPropagation(); toggleWishlist(selectedDetail.id); }} className={`p-4 rounded-xl border border-stone-200 flex items-center justify-center transition-colors ${loggedInMember?.wishlist?.includes(selectedDetail.id) ? 'bg-rose-50 border-rose-200' : 'hover:bg-stone-50'}`}>
+                              <Heart className={`w-6 h-6 ${loggedInMember?.wishlist?.includes(selectedDetail.id) ? 'fill-rose-500 text-rose-500' : 'text-stone-400'}`} />
+                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); addToCart(selectedDetail, selectedSize); closeDetail(); }} disabled={!canAddSelected} className={`flex-1 py-4 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 text-lg shadow-lg ${canAddSelected ? `${cTheme.bg} text-white hover:brightness-110` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}>
+                              <ShoppingCart className="w-5 h-5" /> Sewa Ukuran {selectedSize || '...'}
+                          </button>
+                      </div>
                   </div>
               </div>
            </div>
@@ -799,7 +870,7 @@ const DashboardView = () => {
               <div><h2 className="text-3xl font-serif font-bold text-stone-900 flex items-center gap-3"><Tag className="w-8 h-8 text-red-600"/> Penawaran Spesial</h2><p className="text-stone-500 mt-2">Dapatkan gaun dan setelan impianmu dengan harga khusus.</p></div>
               <button onClick={() => setView('catalog')} className="hidden sm:flex text-rose-600 font-bold items-center hover:text-rose-800 transition-colors">Lihat Semua <ChevronRight className="w-4 h-4 ml-1"/></button>
            </div>
-           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">{promoProducts.map(p => <ProductCardItem key={p.id} product={p} openDetail={openDetail} />)}</div>
+           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">{promoProducts.map((p, idx) => <ProductCardItem key={`${p.id}-${idx}`} product={p} openDetail={openDetail} />)}</div>
            <button onClick={() => setView('catalog')} className="w-full mt-6 sm:hidden border-2 border-stone-200 text-stone-700 font-bold py-3 rounded-xl hover:bg-stone-50">Lihat Semua Promo</button>
         </div>
       )}
@@ -813,7 +884,7 @@ const DashboardView = () => {
               </div>
               <button onClick={() => setView('catalog')} className="hidden sm:flex text-rose-600 font-bold items-center hover:text-rose-800 transition-colors">Katalog Lengkap <ChevronRight className="w-4 h-4 ml-1"/></button>
            </div>
-           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">{displayProducts.map(p => <ProductCardItem key={p.id} product={p} openDetail={openDetail} />)}</div>
+           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">{displayProducts.map((p, idx) => <ProductCardItem key={`${p.id}-${idx}`} product={p} openDetail={openDetail} />)}</div>
            <button onClick={() => setView('catalog')} className="w-full mt-6 sm:hidden border-2 border-stone-200 text-stone-700 font-bold py-3 rounded-xl hover:bg-stone-50">Lihat Semua Koleksi</button>
         </div>
       )}
@@ -823,11 +894,12 @@ const DashboardView = () => {
 };
 
 const CatalogView = () => {
-  const { db } = useContext(AppStateContext);
+  const { db, getAvailableStock, cTheme, loggedInMember, toggleWishlist, cart, addToCart } = useContext(AppStateContext);
   const [activeCategory, setActiveCategory] = useState('Semua');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [currentImgIdx, setCurrentImgIdx] = useState(0);
+  const [selectedSize, setSelectedSize] = useState('');
 
   const filteredProducts = (db.products||[]).filter(p => 
     p.status !== 'Maintenance' && 
@@ -835,13 +907,16 @@ const CatalogView = () => {
     (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const openDetail = (product) => { setSelectedDetail(product); setCurrentImgIdx(0); };
+  const openDetail = (product) => { setSelectedDetail(product); setCurrentImgIdx(0); setSelectedSize(''); };
   const closeDetail = () => setSelectedDetail(null);
 
   const renderDetailModal = () => {
     if (!selectedDetail) return null;
     const hasDiscount = selectedDetail.discountPrice > 0;
-    const { getAvailableStock, cTheme, loggedInMember, toggleWishlist, cart, addToCart } = useContext(AppStateContext);
+    const sizesObj = selectedDetail.sizes || { 'All Size': selectedDetail.totalStock };
+    const availForSelected = selectedSize ? getAvailableStock(selectedDetail.id, selectedSize) : 0;
+    const inCartForSelected = selectedSize ? (cart.find(i => i.cartId === `${selectedDetail.id}-${selectedSize}`)?.quantity || 0) : 0;
+    const canAddSelected = selectedSize && (availForSelected > inCartForSelected);
 
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-stone-900/70 backdrop-blur-sm" onClick={closeDetail}>
@@ -853,7 +928,7 @@ const CatalogView = () => {
                       <button onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(prev => prev === 0 ? selectedDetail.images.length - 1 : prev - 1); }} className="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-white/70 hover:bg-white rounded-full text-stone-800 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"><ChevronLeft className="w-5 h-5"/></button>
                       <button onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(prev => prev === selectedDetail.images.length - 1 ? 0 : prev + 1); }} className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-white/70 hover:bg-white rounded-full text-stone-800 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"><ChevronRight className="w-5 h-5"/></button>
                       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 bg-stone-900/30 px-3 py-1.5 rounded-full backdrop-blur-sm">
-                         {selectedDetail.images.map((_, idx) => <button key={idx} onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(idx); }} className={`w-2 h-2 rounded-full transition-all ${idx === currentImgIdx ? 'bg-white w-4' : 'bg-white/50 hover:bg-white/80'}`} /> )}
+                         {selectedDetail.images.map((_, idx) => <button key={`mdl2-img-${idx}`} onClick={(e) => { e.stopPropagation(); setCurrentImgIdx(idx); }} className={`w-2 h-2 rounded-full transition-all ${idx === currentImgIdx ? 'bg-white w-4' : 'bg-white/50 hover:bg-white/80'}`} /> )}
                       </div>
                     </>
                  )}
@@ -873,20 +948,38 @@ const CatalogView = () => {
                       {selectedDetail.deposit > 0 && <p className="text-xs font-bold text-amber-600 bg-amber-100/50 inline-block px-3 py-1.5 rounded-lg border border-amber-200">+ Deposit Jaminan: {formatRupiah(selectedDetail.deposit)}</p>}
                   </div>
 
+                  <div className="mb-6">
+                     <h4 className="text-sm font-bold text-stone-800 uppercase tracking-wider mb-3">Pilih Ukuran</h4>
+                     <div className="flex flex-wrap gap-3">
+                       {Object.entries(sizesObj).map(([sz, qty]) => {
+                          const szAvail = getAvailableStock(selectedDetail.id, sz);
+                          const isSel = selectedSize === sz;
+                          const isOut = szAvail <= 0;
+                          return (
+                            <button key={`mdl2-sz-${sz}`} disabled={isOut} onClick={() => setSelectedSize(sz)} className={`px-5 py-2.5 rounded-xl text-sm font-bold border transition-all ${isSel ? cTheme.bg + ' text-white border-transparent shadow-md' : isOut ? 'bg-stone-100 text-stone-300 border-stone-200 cursor-not-allowed' : 'bg-white text-stone-600 border-stone-300 hover:border-stone-500'}`}>
+                              {sz} {isOut && <span className="block text-[10px] font-normal leading-none mt-1">Habis</span>}
+                            </button>
+                          )
+                       })}
+                     </div>
+                  </div>
+
                   <div className="mb-8"><h4 className="text-sm font-bold text-stone-800 uppercase tracking-wider mb-3 border-b border-stone-100 pb-2">Deskripsi Pakaian</h4><p className="text-base text-stone-600 leading-relaxed font-light whitespace-pre-line">{selectedDetail.desc}</p></div>
                   {selectedDetail.productLink && (<a href={selectedDetail.productLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-2 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-5 py-3 rounded-xl mb-8 w-full transition-colors"><ExternalLink className="w-4 h-4"/> Lihat Referensi Eksternal / Video</a>)}
 
                   <div className="mt-auto pt-6 border-t border-stone-100 space-y-4">
-                      <div className="flex items-center justify-between mb-2">
-                          <span className="text-stone-500 font-medium">Stok Tersedia Saat Ini:</span>
-                          <span className={`font-bold px-4 py-1.5 rounded-lg text-sm ${getAvailableStock(selectedDetail.id) > 0 ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>{getAvailableStock(selectedDetail.id)} dari {selectedDetail.totalStock} Pcs</span>
-                      </div>
+                      {selectedSize && (
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-stone-500 font-medium">Stok Ukuran {selectedSize}:</span>
+                            <span className={`font-bold px-4 py-1.5 rounded-lg text-sm ${availForSelected > 0 ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>{availForSelected} Pcs Tersedia</span>
+                        </div>
+                      )}
                       <div className="flex gap-3">
                           <button onClick={(e) => { e.stopPropagation(); toggleWishlist(selectedDetail.id); }} className={`p-4 rounded-xl border border-stone-200 flex items-center justify-center transition-colors ${loggedInMember?.wishlist?.includes(selectedDetail.id) ? 'bg-rose-50 border-rose-200' : 'hover:bg-stone-50'}`}>
                               <Heart className={`w-6 h-6 ${loggedInMember?.wishlist?.includes(selectedDetail.id) ? 'fill-rose-500 text-rose-500' : 'text-stone-400'}`} />
                           </button>
-                          <button onClick={(e) => { e.stopPropagation(); addToCart(selectedDetail); closeDetail(); }} disabled={getAvailableStock(selectedDetail.id) <= (cart.find(i => i.id === selectedDetail.id)?.quantity || 0)} className={`flex-1 py-4 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 text-lg shadow-lg ${getAvailableStock(selectedDetail.id) > (cart.find(i => i.id === selectedDetail.id)?.quantity || 0) ? `${cTheme.bg} text-white hover:brightness-110` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}>
-                              <ShoppingCart className="w-5 h-5" /> Sewa Sekarang
+                          <button onClick={(e) => { e.stopPropagation(); addToCart(selectedDetail, selectedSize); closeDetail(); }} disabled={!canAddSelected} className={`flex-1 py-4 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 text-lg shadow-lg ${canAddSelected ? `${cTheme.bg} text-white hover:brightness-110` : 'bg-stone-100 text-stone-400 cursor-not-allowed'}`}>
+                              <ShoppingCart className="w-5 h-5" /> Sewa Ukuran {selectedSize || '...'}
                           </button>
                       </div>
                   </div>
@@ -895,8 +988,6 @@ const CatalogView = () => {
         </div>
     );
   };
-
-  const { cTheme } = useContext(AppStateContext);
 
   return (
     <>
@@ -924,7 +1015,7 @@ const CatalogView = () => {
             </div>
         ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {filteredProducts.map(p => <ProductCardItem key={p.id} product={p} openDetail={openDetail} />)}
+                {filteredProducts.map((p, idx) => <ProductCardItem key={`${p.id}-${idx}`} product={p} openDetail={openDetail} />)}
             </div>
         )}
       </div>
@@ -951,26 +1042,25 @@ const CartView = () => {
       <div className="flex flex-col lg:flex-row gap-8">
         <div className="flex-grow space-y-5">
           {cart.map(item => {
-            const avail = getAvailableStock(item.id);
+            const avail = getAvailableStock(item.id, item.size);
             const effPrice = item.discountPrice > 0 ? item.discountPrice : item.price;
             return (
-              <div key={item.id} className="bg-white p-5 rounded-2xl shadow-sm border border-stone-100 flex flex-col sm:flex-row gap-5 relative">
+              <div key={item.cartId} className="bg-white p-5 rounded-2xl shadow-sm border border-stone-100 flex flex-col sm:flex-row gap-5 relative">
                 {item.discountPrice > 0 && <div className="absolute top-3 left-3 bg-red-600 text-white text-[10px] px-2 py-1 rounded shadow z-10 font-bold">SALE</div>}
                 <img src={item.images?.[0]} alt={item.name} className="w-full sm:w-32 h-48 sm:h-32 object-cover rounded-xl bg-stone-100" />
                 <div className="flex-grow flex flex-col justify-center">
-                  <h3 className="font-bold font-serif text-lg text-stone-900 mb-1">{item.name}</h3>
+                  <h3 className="font-bold font-serif text-lg text-stone-900 mb-1 flex items-center gap-2">{item.name} <span className="text-xs bg-stone-100 border border-stone-200 text-stone-600 px-2 py-0.5 rounded font-sans">Ukuran: {item.size}</span></h3>
                   <div className="mb-4">
                     <p className={`${cTheme.text} font-bold text-lg`}>{formatRupiah(effPrice)} <span className="text-xs text-stone-500 font-normal">/ hari</span></p>
-                    {item.discountPrice > 0 && <p className="text-xs text-stone-400 line-through">Normal: {formatRupiah(item.price)}</p>}
                     {item.deposit > 0 && <p className="text-xs text-amber-600 font-bold mt-1">Uang Jaminan: {formatRupiah(item.deposit)}</p>}
                   </div>
                   <div className="flex items-center justify-between sm:justify-start gap-5">
                     <div className="flex items-center border border-stone-200 rounded-full overflow-hidden h-10 bg-stone-50">
-                      <button onClick={() => updateCartQuantity(item.id, -1)} className="px-4 h-full hover:bg-stone-200 font-bold text-stone-600">-</button>
+                      <button onClick={() => updateCartQuantity(item.cartId, -1)} className="px-4 h-full hover:bg-stone-200 font-bold text-stone-600">-</button>
                       <span className="w-10 text-center font-bold text-stone-800">{item.quantity}</span>
-                      <button onClick={() => updateCartQuantity(item.id, 1)} disabled={item.quantity >= avail} className="px-4 h-full hover:bg-stone-200 font-bold text-stone-600 disabled:opacity-30">+</button>
+                      <button onClick={() => updateCartQuantity(item.cartId, 1)} disabled={item.quantity >= avail} className="px-4 h-full hover:bg-stone-200 font-bold text-stone-600 disabled:opacity-30">+</button>
                     </div>
-                    <button onClick={() => removeFromCart(item.id)} className="p-2.5 text-red-500 hover:bg-red-50 rounded-full transition-colors"><Trash2 className="w-5 h-5" /></button>
+                    <button onClick={() => removeFromCart(item.cartId)} className="p-2.5 text-red-500 hover:bg-red-50 rounded-full transition-colors"><Trash2 className="w-5 h-5" /></button>
                   </div>
                 </div>
               </div>
@@ -1188,13 +1278,13 @@ const MemberProfileView = () => {
               <h3 className="font-bold text-xl text-stone-800 mb-6">Lemari Impian (Wishlist)</h3>
               {myWishlist.length === 0 ? <p className="text-stone-500">Belum ada barang di wishlist Anda.</p> : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {myWishlist.map(p => (
-                    <div key={p.id} className="bg-white border border-stone-100 rounded-2xl p-4 shadow-sm relative">
+                  {myWishlist.map((p, idx) => (
+                    <div key={`${p.id}-${idx}`} className="bg-white border border-stone-100 rounded-2xl p-4 shadow-sm relative">
                       {p.discountPrice > 0 && <span className="absolute top-2 right-2 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded">SALE</span>}
                       <img src={p.images?.[0] || 'https://placehold.co/400?text=No+Image'} className="w-full h-40 object-cover rounded-xl mb-4 bg-stone-100" alt="img"/>
                       <h4 className="font-bold text-stone-800">{p.name}</h4>
                       <p className={`${cTheme.text} font-bold mt-1 mb-4`}>{formatRupiah(p.discountPrice > 0 ? p.discountPrice : p.price)}</p>
-                      <button onClick={() => addToCart(p)} className={`w-full py-2.5 rounded-xl font-bold text-white ${cTheme.bg}`}>Sewa Sekarang</button>
+                      <button onClick={() => addToCart(p, Object.keys(p.sizes||{})[0] || 'All Size')} className={`w-full py-2.5 rounded-xl font-bold text-white ${cTheme.bg}`}>Lihat Detail</button>
                     </div>
                   ))}
                 </div>
@@ -1206,13 +1296,13 @@ const MemberProfileView = () => {
             <div className="space-y-6">
               <h3 className="font-bold text-xl text-stone-800 mb-6">Riwayat Transaksi</h3>
               {myOrders.length === 0 ? <p className="text-stone-500">Belum ada transaksi.</p> : 
-                myOrders.map(o => (
-                  <div key={o.id} className="border border-stone-200 p-6 rounded-2xl bg-stone-50">
+                myOrders.map((o, oIdx) => (
+                  <div key={`hist-${o.id}-${oIdx}`} className="border border-stone-200 p-6 rounded-2xl bg-stone-50">
                     <div className="flex justify-between items-center mb-4 pb-4 border-b border-stone-200">
                        <span className="font-mono text-stone-600 font-bold">{o.id}</span>
                        <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-white border shadow-sm uppercase">{o.status}</span>
                     </div>
-                    {o.items.map(i => <div key={i.id} className="text-sm font-medium text-stone-800 mb-2">{i.quantity}x {i.name}</div>)}
+                    {o.items.map((i, iIdx) => <div key={`hist-item-${i.id}-${iIdx}`} className="text-sm font-medium text-stone-800 mb-2">{i.quantity}x {i.name} (Ukuran: {i.size})</div>)}
                     <div className="flex justify-between items-end mt-6">
                        <div><p className="text-xs text-stone-500 font-bold uppercase tracking-wider mb-1">Total Biaya</p><p className="font-bold text-stone-900 text-xl">{formatRupiah(o.total)}</p></div>
                        <p className="text-sm font-bold text-rose-600 bg-rose-100 px-3 py-1.5 rounded-lg">+ {o.earnedPoints} Poin</p>
@@ -1225,10 +1315,10 @@ const MemberProfileView = () => {
 
           {tab === 'rewards' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {(db.prizes||[]).map(p => {
+              {(db.prizes||[]).map((p, pIdx) => {
                 const canRedeem = loggedInMember.points >= p.points;
                 return (
-                  <div key={p.id} className="border border-stone-200 rounded-2xl overflow-hidden bg-white shadow-sm flex flex-col">
+                  <div key={`prz-${p.id}-${pIdx}`} className="border border-stone-200 rounded-2xl overflow-hidden bg-white shadow-sm flex flex-col">
                     <div className="h-40 bg-stone-100"><img src={p.image} className="w-full h-full object-cover" alt="prize"/></div>
                     <div className="p-5 flex flex-col flex-grow">
                       <h4 className="font-bold text-stone-800 text-lg mb-2">{p.name}</h4>
@@ -1412,12 +1502,12 @@ const AdminStats = () => {
                Belum ada data pemasukan pada periode ini.
             </div>
           ) : (
-            completed.map(o => {
+            completed.map((o, oIdx) => {
               const isExpanded = expandedOrderId === o.id;
               const netIncome = o.total - (o.totalDeposit || 0) + (o.denda || 0);
 
               return (
-                <div key={`inc-${o.id}`} className="border border-stone-200 rounded-2xl overflow-hidden hover:shadow-sm transition-shadow bg-white">
+                <div key={`inc-${o.id}-${oIdx}`} className="border border-stone-200 rounded-2xl overflow-hidden hover:shadow-sm transition-shadow bg-white">
                   <div 
                     onClick={() => setExpandedOrderId(isExpanded ? null : o.id)}
                     className="flex flex-col sm:flex-row justify-between sm:items-center p-4 cursor-pointer hover:bg-stone-50 gap-3"
@@ -1446,12 +1536,12 @@ const AdminStats = () => {
                         <div className="bg-white p-5 rounded-2xl border border-stone-100 shadow-sm">
                           <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4 border-b border-stone-100 pb-3 flex items-center gap-2"><Package className="w-4 h-4"/> Rincian Sewa Pakaian</h5>
                           <div className="space-y-3">
-                            {o.items.map(item => (
-                              <div key={`inc-item-${item.id}`} className="flex items-center gap-3">
+                            {o.items.map((item, iIdx) => (
+                              <div key={`inc-item-${item.id}-${iIdx}`} className="flex items-center gap-3">
                                 <img src={item.images?.[0] || 'https://placehold.co/400'} alt={item.name} className="w-12 h-12 rounded-xl border border-stone-100 object-cover shadow-sm"/>
                                 <div>
                                   <p className="font-bold text-sm text-stone-800">{item.quantity}x {item.name}</p>
-                                  <p className="text-[10px] text-stone-500 font-mono">{item.id}</p>
+                                  <p className="text-[10px] text-stone-500 font-mono">{item.id} &bull; Ukuran: {item.size}</p>
                                 </div>
                               </div>
                             ))}
@@ -1515,8 +1605,8 @@ const AdminOrderManager = () => {
       </div>
 
       <div className="space-y-5">
-        {displayedOrders.length === 0 ? <div className="text-center py-16 bg-white rounded-3xl border border-dashed border-stone-300 text-stone-500"><Package className="w-12 h-12 mx-auto mb-3 text-stone-300"/>Tidak ada pesanan di kategori ini.</div> : displayedOrders.map(order => (
-          <div key={`ord-${order.id}`} className="bg-white border border-stone-200 rounded-3xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+        {displayedOrders.length === 0 ? <div className="text-center py-16 bg-white rounded-3xl border border-dashed border-stone-300 text-stone-500"><Package className="w-12 h-12 mx-auto mb-3 text-stone-300"/>Tidak ada pesanan di kategori ini.</div> : displayedOrders.map((order, ordIdx) => (
+          <div key={`mng-ord-${order.id}-${ordIdx}`} className="bg-white border border-stone-200 rounded-3xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
             <div className="p-5 md:p-6 flex justify-between items-center cursor-pointer hover:bg-stone-50 gap-4" onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}>
               <div className="flex items-center gap-5">
                 <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 border ${order.memberId ? 'bg-rose-50 border-rose-200 text-rose-600' : 'bg-stone-100 border-stone-200 text-stone-500'}`}>
@@ -1564,13 +1654,13 @@ const AdminOrderManager = () => {
                   <div className="p-5 border-b border-stone-100">
                     <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4">Daftar Pakaian</h5>
                     <div className="space-y-3">
-                      {order.items.map(item => {
+                      {order.items.map((item, iIdx) => {
                         const effPrice = item.discountPrice > 0 ? item.discountPrice : item.price;
                         return (
-                        <div key={item.id} className="flex items-center justify-between text-sm">
+                        <div key={`mng-item-${item.cartId || item.id}-${iIdx}`} className="flex items-center justify-between text-sm">
                            <div className="flex items-center gap-3">
                               <img src={item.images?.[0] || 'https://placehold.co/400'} className="w-12 h-12 rounded-lg object-cover border" alt="img"/>
-                              <span className="font-bold text-stone-800">{item.quantity}x {item.name}</span>
+                              <span className="font-bold text-stone-800">{item.quantity}x {item.name} <span className="font-normal text-stone-500 ml-1">({item.size})</span></span>
                            </div>
                            <div className="text-right">
                               <span className="font-medium text-stone-500 block">{formatRupiah(effPrice * item.quantity * order.duration)} (Sewa)</span>
@@ -1629,8 +1719,14 @@ const AdminInventory = () => {
   const [expandedId, setExpandedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   
-  const [formData, setFormData] = useState({ name: '', price: '', discountPrice: '', deposit: '', category: db.categories[0] || '', desc: '', images: [], totalStock: 1, productLink: '' });
-  const [editData, setEditData] = useState({ price: '', discountPrice: '', totalStock: '', deposit: '', productLink: '', images: [] });
+  // BARU: State untuk varian ukuran dinamis
+  const [availableSizes, setAvailableSizes] = useState(['S', 'M', 'L', 'XL', 'All Size']);
+  const [newSizeInput, setNewSizeInput] = useState('');
+  const [newEditSizeInput, setNewEditSizeInput] = useState('');
+
+  // PENAMBAHAN FIELD SIZES PADA FORM
+  const [formData, setFormData] = useState({ name: '', price: '', discountPrice: '', deposit: '', category: db.categories[0] || '', desc: '', images: [], productLink: '', sizes: {} });
+  const [editData, setEditData] = useState({ price: '', discountPrice: '', deposit: '', productLink: '', images: [], sizes: {} });
 
   const handleImageUpload = async (e, isEdit = false) => { 
     const files = Array.from(e.target.files); 
@@ -1665,35 +1761,50 @@ const AdminInventory = () => {
     }
   };
 
-  const generateId = (cat) => { const prefix = cat ? cat.substring(0,2).toUpperCase() : 'XX'; const count = (db.products||[]).filter(p => p.id.startsWith(prefix)).length + 1; return `${prefix}-${1000 + count}`; };
+  const generateId = (cat) => { 
+    const prefix = cat ? cat.substring(0,2).toUpperCase() : 'XX'; 
+    const existing = (db.products||[]).filter(p => p.id.startsWith(prefix));
+    let maxCount = 1000;
+    existing.forEach(p => {
+      const num = parseInt(p.id.split('-')[1]);
+      if(!isNaN(num) && num > maxCount) maxCount = num;
+    });
+    return `${prefix}-${maxCount + 1}`; 
+  };
   
   const handleAddProduct = (e) => { 
     e.preventDefault(); 
+    // Kalkulasi Total Stok dari semua varian ukuran
+    const totalStock = Object.values(formData.sizes || {}).reduce((a, b) => a + (parseInt(b) || 0), 0);
+    if (totalStock <= 0) { showToast("Total stok baju (dari semua ukuran) tidak boleh 0!", "error"); return; }
+
     requireApproval('ADD_PRODUCT', { 
       id: generateId(formData.category), 
       ...formData, 
       price: parseInt(formData.price), 
       discountPrice: formData.discountPrice ? parseInt(formData.discountPrice) : 0,
       deposit: parseInt(formData.deposit||0), 
-      totalStock: parseInt(formData.totalStock), 
+      totalStock: totalStock, 
       status: 'Tersedia' 
-    }, 'Produk disimpan.'); 
+    }, 'Produk beserta varian ukuran disimpan.'); 
     setShowAddForm(false); 
-    setFormData({ name: '', price: '', discountPrice: '', deposit:'', category: db.categories[0] || '', desc: '', images: [], totalStock: 1, productLink: '' }); 
+    setFormData({ name: '', price: '', discountPrice: '', deposit:'', category: db.categories[0] || '', desc: '', images: [], productLink: '', sizes: {} }); 
   };
   const handleAddCategory = (e) => { e.preventDefault(); if (newCategoryName.trim() && !(db.categories||[]).includes(newCategoryName.trim())) { requireApproval('ADD_CATEGORY', newCategoryName.trim(), 'Kategori dibuat.'); setNewCategoryName(''); } };
   
   const handleSaveEdit = (p) => { 
-    if(editData.price && editData.totalStock) { 
+    if(editData.price) { 
+      const totalStock = Object.values(editData.sizes || {}).reduce((a, b) => a + (parseInt(b) || 0), 0);
       requireApproval('EDIT_PRODUCT', {
         ...p, 
         price: parseInt(editData.price), 
         discountPrice: editData.discountPrice ? parseInt(editData.discountPrice) : 0,
         deposit: parseInt(editData.deposit||0), 
-        totalStock: parseInt(editData.totalStock), 
+        totalStock: totalStock, 
+        sizes: editData.sizes,
         productLink: editData.productLink, 
         images: editData.images
-      }, 'Perubahan disimpan.'); 
+      }, 'Perubahan varian disimpan.'); 
       setEditingId(null); 
     } 
   };
@@ -1748,17 +1859,38 @@ const AdminInventory = () => {
                      <div><label className="block text-sm font-bold text-rose-600 mb-2 flex items-center gap-1">Harga Diskon <Tag className="w-4 h-4"/></label><input type="number" value={formData.discountPrice} onChange={e=>setFormData({...formData, discountPrice: e.target.value})} className="w-full px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl text-[16px] outline-none focus:border-rose-400 placeholder-rose-300" placeholder="Kosongkan = Normal" /></div>
                   </div>
                   <div><label className="block text-sm font-bold text-stone-700 mb-2">Pilih Kategori</label><select required value={formData.category} onChange={e=>setFormData({...formData, category: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400 cursor-pointer">{(db.categories||[]).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-                  <div className="grid grid-cols-2 gap-4">
-                     <div><label className="block text-sm font-bold text-stone-700 mb-2">Jumlah Fisik Barang</label><input required type="number" min="1" value={formData.totalStock} onChange={e=>setFormData({...formData, totalStock: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400" /></div>
-                     <div><label className="block text-sm font-bold text-amber-700 mb-2">Deposit (Jaminan)</label><input type="number" value={formData.deposit} onChange={e=>setFormData({...formData, deposit: e.target.value})} className="w-full px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-[16px] outline-none focus:border-amber-400" /></div>
+                  <div><label className="block text-sm font-bold text-amber-700 mb-2">Deposit (Jaminan)</label><input type="number" value={formData.deposit} onChange={e=>setFormData({...formData, deposit: e.target.value})} className="w-full px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-[16px] outline-none focus:border-amber-400" /></div>
+                  
+                  {/* FORM SIZES DINAMIS */}
+                  <div className="sm:col-span-2 bg-stone-50 p-5 rounded-2xl border border-stone-200 mb-2">
+                    <label className="block text-sm font-bold text-stone-700 mb-3">Manajemen Varian Ukuran & Stok Fisik</label>
+                    <div className="flex flex-wrap gap-3 mb-4">
+                      {availableSizes.map(sz => (
+                        <div key={sz} className="w-20">
+                          <label className="block text-xs font-bold text-stone-500 mb-1 truncate" title={sz}>{sz}</label>
+                          <input 
+                            type="number" min="0"
+                            value={formData.sizes?.[sz] || ''} 
+                            onChange={e => setFormData({...formData, sizes: {...(formData.sizes||{}), [sz]: parseInt(e.target.value)||0}})} 
+                            className="w-full px-3 py-2.5 bg-white border border-stone-200 rounded-lg text-sm outline-none focus:border-stone-400 font-bold text-stone-700" 
+                            placeholder="0"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input type="text" placeholder="Tambah Ukuran (XXL, dll)" value={newSizeInput} onChange={e=>setNewSizeInput(e.target.value)} className="px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm outline-none focus:border-stone-400 w-48" />
+                      <button type="button" onClick={() => { if(newSizeInput && !availableSizes.includes(newSizeInput)) { setAvailableSizes([...availableSizes, newSizeInput]); setNewSizeInput(''); } }} className="px-4 py-2 bg-stone-800 text-white rounded-lg text-xs font-bold hover:bg-black transition-colors"><Plus className="w-4 h-4 inline-block mr-1"/> Tambah</button>
+                    </div>
                   </div>
+
                   <div className="sm:col-span-2"><label className="block text-sm font-bold text-stone-700 mb-2">Link Referensi/Eksternal (Opsional)</label><input type="url" placeholder="https://" value={formData.productLink} onChange={e=>setFormData({...formData, productLink: e.target.value})} className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-[16px] outline-none focus:border-stone-400" /></div>
                   
                   <div className="sm:col-span-2">
                     <label className="block text-sm font-bold text-stone-700 mb-2">Upload Foto Barang (Bisa Banyak)</label>
                     <div className="flex gap-3 overflow-x-auto pb-2">
                        {formData.images.map((img, idx) => (
-                         <div key={idx} className="relative shrink-0">
+                         <div key={`img-up-${idx}`} className="relative shrink-0">
                            <img src={img} className="w-20 h-20 object-cover rounded-xl border border-stone-200 shadow-sm" alt="up"/>
                            <button type="button" onClick={() => removeImage(idx, false)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600"><X className="w-3 h-3"/></button>
                          </div>
@@ -1777,7 +1909,7 @@ const AdminInventory = () => {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {filteredProducts.map(p => {
+            {filteredProducts.map((p, pIdx) => {
               const avail = getAvailableStock(p.id);
               const isExpanded = expandedId === p.id;
               const isEditing = editingId === p.id;
@@ -1785,7 +1917,7 @@ const AdminInventory = () => {
               const effPrice = hasDiskon ? p.discountPrice : p.price;
 
               return (
-                <div key={p.id} className="bg-white border border-stone-100 rounded-3xl shadow-sm overflow-hidden flex flex-col hover:shadow-lg transition-shadow relative">
+                <div key={`inv-prod-${p.id}-${pIdx}`} className="bg-white border border-stone-100 rounded-3xl shadow-sm overflow-hidden flex flex-col hover:shadow-lg transition-shadow relative">
                    {hasDiskon && <span className="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow z-10">SALE</span>}
                    <div className="p-5 flex gap-5 cursor-pointer hover:bg-stone-50 transition-colors" onClick={() => {setExpandedId(isExpanded ? null : p.id); setEditingId(null);}}>
                       <img src={p.images?.[0] || 'https://placehold.co/400?text=No+Image'} alt={p.name} className="w-20 h-20 rounded-2xl object-cover border border-stone-100 shadow-sm" />
@@ -1808,15 +1940,31 @@ const AdminInventory = () => {
                           <div className="space-y-4 mb-5 bg-white p-4 rounded-2xl border border-stone-200 shadow-sm">
                              <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Harga Normal</label><input type="number" value={editData.price} onChange={e=>setEditData({...editData, price: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
                              <div><label className="text-xs font-bold text-rose-600 uppercase tracking-wider">Ubah Harga Diskon</label><input type="number" value={editData.discountPrice} onChange={e=>setEditData({...editData, discountPrice: e.target.value})} className="w-full mt-2 px-4 py-2 border border-rose-200 bg-rose-50 rounded-xl text-[16px] outline-none focus:border-rose-400" placeholder="Kosongkan jika tidak promo" /></div>
-                             <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Stok Fisik</label><input type="number" value={editData.totalStock} onChange={e=>setEditData({...editData, totalStock: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
                              <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Deposit</label><input type="number" value={editData.deposit} onChange={e=>setEditData({...editData, deposit: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
+                             
+                             <div className="bg-stone-50 p-4 rounded-xl border border-stone-200">
+                                <label className="text-xs font-bold text-stone-500 uppercase tracking-wider block mb-3">Ubah Stok per Ukuran</label>
+                                <div className="flex flex-wrap gap-3 mb-3">
+                                  {Array.from(new Set([...availableSizes, ...Object.keys(editData.sizes || {})])).map(sz => (
+                                    <div key={`edit-sz-${sz}`} className="w-16">
+                                      <span className="block text-[10px] font-bold text-stone-400 mb-1 truncate" title={sz}>{sz}</span>
+                                      <input type="number" value={editData.sizes?.[sz] || ''} onChange={e => setEditData({...editData, sizes: {...(editData.sizes||{}), [sz]: parseInt(e.target.value)||0}})} className="w-full px-2 py-1.5 border border-stone-200 rounded-lg text-sm outline-none font-bold text-stone-700" placeholder="0"/>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="flex items-center gap-2 mt-2 pt-2 border-t border-stone-200">
+                                  <input type="text" placeholder="Ukuran Baru..." value={newEditSizeInput} onChange={e=>setNewEditSizeInput(e.target.value)} className="px-2 py-1.5 bg-white border border-stone-200 rounded-lg text-xs outline-none w-32" />
+                                  <button type="button" onClick={() => { if(newEditSizeInput && !availableSizes.includes(newEditSizeInput)) { setAvailableSizes([...availableSizes, newEditSizeInput]); setNewEditSizeInput(''); } }} className="px-3 py-1.5 bg-stone-300 text-stone-800 rounded-lg text-xs font-bold hover:bg-stone-400">Tambah</button>
+                                </div>
+                             </div>
+
                              <div><label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ubah Link Eksternal</label><input type="url" value={editData.productLink} onChange={e=>setEditData({...editData, productLink: e.target.value})} className="w-full mt-2 px-4 py-2 border border-stone-200 rounded-xl text-[16px] outline-none" /></div>
                              
                              <div>
                                <label className="text-xs font-bold text-stone-500 uppercase tracking-wider">Album Foto Produk</label>
                                <div className="flex gap-2 overflow-x-auto pb-2 mt-2">
                                   {editData.images?.map((img, idx) => (
-                                    <div key={idx} className="relative shrink-0">
+                                    <div key={`img-edit-${idx}`} className="relative shrink-0">
                                       <img src={img} className="w-12 h-12 object-cover rounded-lg border border-stone-200 shadow-sm" alt="e"/>
                                       <button type="button" onClick={() => removeImage(idx, true)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 shadow-md hover:bg-red-600"><X className="w-3 h-3"/></button>
                                     </div>
@@ -1837,7 +1985,7 @@ const AdminInventory = () => {
                           <div className="flex flex-wrap sm:flex-nowrap gap-3 mt-auto">
                             <button onClick={() => requireApproval('UPDATE_PRODUCT_STATUS', {id: p.id, status: 'Maintenance'}, 'Pakaian masuk ruang perawatan.')} className="w-full sm:flex-1 py-3 bg-yellow-50 text-yellow-700 rounded-xl text-xs uppercase tracking-wider font-bold flex items-center justify-center gap-2 hover:bg-yellow-100 border border-yellow-200"><Edit3 className="w-4 h-4"/> Perawatan</button>
                             <button onClick={() => requireApproval('DELETE_PRODUCT', {id: p.id}, 'Katalog dihapus.', true)} className="flex-1 py-3 bg-white text-red-600 rounded-xl text-xs uppercase tracking-wider font-bold flex items-center justify-center gap-2 hover:bg-red-50 border border-stone-200 shadow-sm"><Trash2 className="w-4 h-4"/> Hapus</button>
-                            <button onClick={(e) => { e.stopPropagation(); setEditingId(p.id); setEditData({price: p.price, discountPrice: p.discountPrice || '', totalStock: p.totalStock, deposit: p.deposit, productLink: p.productLink||'', images: p.images || [p.image]}); }} className="flex-1 py-3 bg-stone-900 text-white rounded-xl text-xs uppercase tracking-wider font-bold flex items-center justify-center gap-2 hover:bg-black shadow-md"><Edit3 className="w-4 h-4"/> Edit</button>
+                            <button onClick={(e) => { e.stopPropagation(); setEditingId(p.id); setEditData({price: p.price, discountPrice: p.discountPrice || '', deposit: p.deposit, productLink: p.productLink||'', images: p.images || [p.image], sizes: p.sizes || {'All Size': p.totalStock} }); }} className="flex-1 py-3 bg-stone-900 text-white rounded-xl text-xs uppercase tracking-wider font-bold flex items-center justify-center gap-2 hover:bg-black shadow-md"><Edit3 className="w-4 h-4"/> Edit</button>
                           </div>
                         )}
                      </div>
@@ -1855,8 +2003,8 @@ const AdminInventory = () => {
            <p className="text-stone-500 mb-8">Pakaian yang dikembalikan dari pelanggan ada di sini. Disembunyikan dari katalog publik secara otomatis.</p>
            {maintenanceProducts.length === 0 ? <div className="text-center py-16 bg-stone-50 border border-dashed border-stone-300 rounded-3xl text-stone-500"><CheckCircle className="w-12 h-12 mx-auto mb-4 text-stone-300"/>Semua barang dalam kondisi baik.</div> : (
              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-               {maintenanceProducts.map(p => (
-                 <div key={p.id} className="border border-stone-200 rounded-3xl p-5 flex flex-col hover:shadow-md transition-shadow bg-stone-50">
+               {maintenanceProducts.map((p, pIdx) => (
+                 <div key={`maint-prod-${p.id}-${pIdx}`} className="border border-stone-200 rounded-3xl p-5 flex flex-col hover:shadow-md transition-shadow bg-stone-50">
                     <img src={p.images?.[0] || 'https://placehold.co/400?text=No+Image'} className="w-full h-40 object-cover rounded-2xl mb-4 shadow-sm" alt="Item"/>
                     <h4 className="font-bold text-stone-800 text-lg mb-1">{p.name}</h4>
                     <p className="text-xs font-mono text-stone-500 mb-5">{p.id}</p>
@@ -1948,17 +2096,17 @@ const AdminCalendar = () => {
                <button onClick={() => setSelectedDate(null)} className="p-2 bg-white hover:bg-stone-100 rounded-full text-stone-500 border border-stone-200 shadow-sm"><X className="w-5 h-5"/></button>
             </div>
             <div className="p-6 md:p-8 max-h-[60vh] overflow-y-auto space-y-5">
-               {selectedDate.orders.map(o => (
-                 <div key={`modal-ord-${o.id}`} className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm">
+               {selectedDate.orders.map((o, oIdx) => (
+                 <div key={`modal-cal-ord-${o.id}-${oIdx}`} className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm">
                     <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-4 pb-4 border-b border-stone-100 gap-3">
                        <div><p className="font-bold text-base text-stone-800">{o.customer.name}</p><p className="text-xs text-stone-500 font-mono mt-1">{o.id}</p></div>
                        <span className="text-[10px] font-bold px-3 py-1.5 bg-stone-100 border border-stone-200 rounded-lg text-stone-600 w-max uppercase tracking-wider">{o.status}</span>
                     </div>
                     <ul className="space-y-3">
-                       {o.items.map(item => (
-                         <li key={`modal-item-${item.id}`} className="flex items-center gap-4 text-sm">
+                       {o.items.map((item, iIdx) => (
+                         <li key={`modal-cal-item-${item.cartId || item.id}-${iIdx}`} className="flex items-center gap-4 text-sm">
                             <img src={item.images?.[0]} alt={item.name} className="w-12 h-12 rounded-xl border border-stone-100 object-cover shadow-sm"/>
-                            <div><p className="font-bold text-stone-800 leading-tight">{item.quantity}x {item.name}</p><p className="text-[10px] text-stone-400 font-mono mt-1">{item.id}</p></div>
+                            <div><p className="font-bold text-stone-800 leading-tight">{item.quantity}x {item.name}</p><p className="text-[10px] text-stone-400 font-mono mt-1">{item.id} (Ukuran: {item.size || '-'})</p></div>
                          </li>
                        ))}
                     </ul>
@@ -2021,12 +2169,12 @@ const AdminCustomers = () => {
           <table className="w-full text-left border-collapse min-w-[700px]">
             <thead><tr className="bg-stone-50 text-stone-500 font-bold border-b border-stone-200 text-xs uppercase tracking-wider"><th className="p-5">Profil</th><th className="p-5">Kontak</th><th className="p-5 text-right">Poin</th></tr></thead>
             <tbody className="divide-y divide-stone-100">
-              {approvedMembers.length === 0 ? <tr><td colSpan="3" className="text-center py-10 text-stone-500">Belum ada member.</td></tr> : approvedMembers.map(m => {
+              {approvedMembers.length === 0 ? <tr><td colSpan="3" className="text-center py-10 text-stone-500">Belum ada member.</td></tr> : approvedMembers.map((m, mIdx) => {
                 const isExpanded = expandedMemberId === m.id;
                 const isEditing = editingMemberId === m.id;
 
                 return (
-                  <React.Fragment key={m.id}>
+                  <React.Fragment key={`mem-${m.id}-${mIdx}`}>
                     <tr onClick={() => { if(!isEditing) { setExpandedMemberId(isExpanded ? null : m.id); setEditingMemberId(null); } }} className={`transition-colors ${isEditing ? 'bg-amber-50 cursor-default' : 'cursor-pointer hover:bg-stone-50/50'} ${isExpanded && !isEditing ? 'bg-stone-50' : ''}`}>
                       <td className="p-5 flex items-center gap-4">
                         {m.photoUrl ? <img src={m.photoUrl} alt="Pic" className="w-12 h-12 rounded-full object-cover border"/> : <div className="w-12 h-12 rounded-full bg-stone-100 border flex items-center justify-center"><User className="w-6 h-6 text-stone-400"/></div>}
@@ -2113,7 +2261,7 @@ const AdminCustomers = () => {
             <thead><tr className="bg-stone-50 text-stone-500 font-bold border-b border-stone-200 text-xs uppercase tracking-wider"><th className="p-5">Pelanggan</th><th className="p-5">KTP</th><th className="p-5">Kontak</th><th className="p-5 text-right">Riwayat</th></tr></thead>
             <tbody className="divide-y divide-stone-100">
               {nonMembers.map((nm, idx) => (
-                <tr key={idx} className="hover:bg-stone-50/50">
+                <tr key={`nonmem-${idx}`} className="hover:bg-stone-50/50">
                   <td className="p-5 font-bold text-stone-800">{nm.name}</td>
                   <td className="p-5 font-mono text-stone-600">{nm.identity}</td>
                   <td className="p-5 font-medium text-stone-700">{nm.phone}</td>
@@ -2126,8 +2274,8 @@ const AdminCustomers = () => {
 
         {tab === 'approval' && (
           <div className="p-6 md:p-8 space-y-5">
-            {memberApps.map(app => (
-              <div key={app.id} className="bg-stone-50 p-6 rounded-2xl border border-stone-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-sm">
+            {memberApps.map((app, appIdx) => (
+              <div key={`app-${app.id}-${appIdx}`} className="bg-stone-50 p-6 rounded-2xl border border-stone-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-sm">
                  <div className="flex items-center gap-5">
                     {app.payload.photoUrl ? <img src={app.payload.photoUrl} className="w-16 h-16 rounded-full object-cover border-4 border-white shadow-md" alt="foto"/> : <div className="w-16 h-16 rounded-full bg-white shadow-md border flex items-center justify-center"><User className="w-8 h-8 text-stone-300"/></div>}
                     <div>
@@ -2179,8 +2327,8 @@ const AdminPrizes = () => {
          </form>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {(db.prizes||[]).map(p => (
-           <div key={p.id} className="bg-white border border-stone-200 rounded-3xl shadow-sm overflow-hidden flex flex-col hover:shadow-lg">
+        {(db.prizes||[]).map((p, idx) => (
+           <div key={`${p.id}-${idx}`} className="bg-white border border-stone-200 rounded-3xl shadow-sm overflow-hidden flex flex-col hover:shadow-lg">
               <div className="h-40 bg-stone-100 relative">
                  <img src={p.image} className="w-full h-full object-cover" alt="prize"/>
                  <button onClick={() => requireApproval('DELETE_PRIZE', {id: p.id}, 'Dihapus.', true)} className="absolute top-3 right-3 p-2 bg-red-600 text-white rounded-full hover:bg-red-700"><Trash2 className="w-4 h-4"/></button>
@@ -2205,10 +2353,10 @@ const AdminApprovals = () => {
   return (
     <div className="space-y-5 w-full animate-fade-in-down">
       <h2 className="text-xl font-serif font-bold text-stone-800 mb-6 flex items-center gap-3"><Shield className="w-6 h-6 text-rose-600"/> Otorisasi Sistem ({sysApps.length})</h2>
-      {sysApps.map(app => {
+      {sysApps.map((app, aIdx) => {
         const canApprove = ['owner','developer'].includes(loggedInUser.role) || (loggedInUser.role === 'manager' && !(app.requesterRole === 'manager' && app.actionType === 'UPDATE_USER'));
         return (
-          <div key={app.id} className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div key={`sys-app-${app.id}-${aIdx}`} className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
             <div className="overflow-hidden w-full md:w-auto">
               <div className="flex flex-wrap items-center gap-3 mb-3"><span className="bg-yellow-50 text-yellow-700 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded border border-yellow-200">Butuh Akses</span><span className="text-[10px] text-stone-400 font-mono">{app.id}</span></div>
               <p className="font-bold text-stone-900 text-lg truncate mb-1">{app.actionType.replace('_', ' ')}</p>
@@ -2355,8 +2503,8 @@ const AdminSystemSettings = () => {
            <table className="w-full text-left min-w-[600px] border-collapse">
              <thead><tr className="text-xs font-bold text-stone-400 uppercase tracking-wider border-b border-stone-200 bg-stone-50"><th className="p-4 rounded-tl-xl">Identitas Staf</th><th className="p-4">Username Login</th><th className="p-4">Ubah Password</th><th className="p-4 text-right rounded-tr-xl">Pangkat Akses (Role)</th></tr></thead>
              <tbody className="divide-y divide-stone-100">
-               {(db.users||[]).filter(u => u.role !== 'developer').map(u => (
-                 <tr key={u.id} className="hover:bg-stone-50/50 transition-colors">
+               {(db.users||[]).filter(u => u.role !== 'developer').map((u, uIdx) => (
+                 <tr key={`staf-${u.id}-${uIdx}`} className="hover:bg-stone-50/50 transition-colors">
                    <td className="p-4 font-bold text-stone-800 text-base">{u.name} {u.id === loggedInUser?.id && <span className="text-[10px] bg-stone-800 text-white px-2.5 py-1 rounded-md ml-3 uppercase tracking-widest shadow-sm">Anda</span>}</td>
                    <td className="p-4 text-sm font-mono text-stone-500">{u.username}</td>
                    <td className="p-4">
@@ -2390,8 +2538,8 @@ const AdminLogs = () => {
             <thead><tr className="bg-white text-stone-400 font-bold border-b border-stone-200 text-xs uppercase tracking-wider"><th className="p-5">Waktu Kejadian</th><th className="p-5">Aktor (User)</th><th className="p-5">Kategori</th><th className="p-5">Detail Perubahan</th></tr></thead>
             <tbody className="divide-y divide-stone-100">
                {!(db.logs?.length) ? <tr><td colSpan="4" className="text-center py-16 text-stone-500 font-medium bg-stone-50">Belum ada riwayat aktivitas tercatat.</td></tr> :
-                db.logs?.map(log => (
-                   <tr key={log.id} className="hover:bg-stone-50/80 transition-colors">
+                db.logs?.map((log, lIdx) => (
+                   <tr key={`log-${log.id}-${lIdx}`} className="hover:bg-stone-50/80 transition-colors">
                       <td className="p-5 text-xs font-mono text-stone-500">{log.timestamp}</td>
                       <td className="p-5 font-bold text-stone-800 text-base">{log.user}</td>
                       <td className="p-5"><span className="bg-stone-100 border border-stone-200 px-3 py-1.5 rounded-lg text-xs font-bold text-stone-600 shadow-sm uppercase tracking-wider">{log.action}</span></td>
@@ -2492,7 +2640,7 @@ const AppContent = () => {
   if (isDbLoading) return <SplashScreen />;
   if (view === 'admin' && !loggedInUser) return <AdminLogin />;
   if (view === 'admin' && loggedInUser) return <AdminLayout />;
-  
+
   return (
     <CustomerLayout>
       {view === 'dashboard' && <DashboardView />}
