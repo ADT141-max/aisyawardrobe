@@ -1,23 +1,38 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext, useState, Suspense } from 'react';
 import { Package } from 'lucide-react';
 
 // Import Context Utama
 import { AppStateProvider, AppStateContext } from './context/AppContext';
 
-// Import Tampilan Pelanggan (Customer Views)
+// Import Tampilan Pelanggan (Dimuat langsung agar Beranda instant & super cepat)
 import { CustomerLayout } from './components/customer/CustomerLayout';
 import { DashboardView, CatalogView } from './components/customer/HomeCatalog';
 import { CartView, CheckoutView, SuccessView } from './components/customer/OrderFlow';
 import { MemberAuthView, MemberProfileView } from './components/customer/MemberSystem';
 
-// Import Tampilan Admin (Admin Views)
-import { AdminLogin, AdminLayout, AdminStats } from './components/admin/AdminCore';
-import { AdminInventory, AdminOrderManager } from './components/admin/AdminInventoryOrders';
-import { AdminCalendar, AdminCustomers, AdminPrizes, AdminPromo, AdminApprovals } from './components/admin/AdminExtended';
-import { AdminAccountSettings, AdminSystemSettings, AdminLogs, AdminDeveloperPanel } from './components/admin/AdminAdvanced';
+// ============================================================================
+// LAZY LOADING PANEL ADMIN (Hanya diunduh saat sistem mendeteksi akses staf)
+// ============================================================================
+const AdminLogin = React.lazy(() => import('./components/admin/AdminCore').then(m => ({ default: m.AdminLogin })));
+const AdminLayout = React.lazy(() => import('./components/admin/AdminCore').then(m => ({ default: m.AdminLayout })));
+const AdminStats = React.lazy(() => import('./components/admin/AdminCore').then(m => ({ default: m.AdminStats })));
+
+const AdminInventory = React.lazy(() => import('./components/admin/AdminInventoryOrders').then(m => ({ default: m.AdminInventory })));
+const AdminOrderManager = React.lazy(() => import('./components/admin/AdminInventoryOrders').then(m => ({ default: m.AdminOrderManager })));
+
+const AdminCalendar = React.lazy(() => import('./components/admin/AdminExtended').then(m => ({ default: m.AdminCalendar })));
+const AdminCustomers = React.lazy(() => import('./components/admin/AdminExtended').then(m => ({ default: m.AdminCustomers })));
+const AdminPrizes = React.lazy(() => import('./components/admin/AdminExtended').then(m => ({ default: m.AdminPrizes })));
+const AdminPromo = React.lazy(() => import('./components/admin/AdminExtended').then(m => ({ default: m.AdminPromo })));
+const AdminApprovals = React.lazy(() => import('./components/admin/AdminExtended').then(m => ({ default: m.AdminApprovals })));
+
+const AdminAccountSettings = React.lazy(() => import('./components/admin/AdminAdvanced').then(m => ({ default: m.AdminAccountSettings })));
+const AdminSystemSettings = React.lazy(() => import('./components/admin/AdminAdvanced').then(m => ({ default: m.AdminSystemSettings })));
+const AdminLogs = React.lazy(() => import('./components/admin/AdminAdvanced').then(m => ({ default: m.AdminLogs })));
+const AdminDeveloperPanel = React.lazy(() => import('./components/admin/AdminAdvanced').then(m => ({ default: m.AdminDeveloperPanel })));
 
 // ============================================================================
-// KOMPONEN SPLASH SCREEN LOADING
+// KOMPONEN SPLASH SCREEN LOADING INITIAL
 // ============================================================================
 const SplashScreen = () => {
   const { db } = useContext(AppStateContext);
@@ -37,6 +52,16 @@ const SplashScreen = () => {
     </div>
   );
 };
+
+// ============================================================================
+// LOADING FALLBACK KHUSUS SUB-MODUL ADMIN
+// ============================================================================
+const AdminLoadingFallback = () => (
+  <div className="min-h-screen bg-stone-900 flex flex-col items-center justify-center text-stone-400 font-mono">
+    <div className="w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+    <p className="tracking-widest text-xs uppercase text-amber-400">Mengunduh Modul Keamanan Admin...</p>
+  </div>
+);
 
 // ============================================================================
 // ROUTER PENGATUR TAMPILAN ADMIN
@@ -78,11 +103,16 @@ const AppContent = () => {
 
   if (isDbLoading) return <SplashScreen />;
   
+  // Mengamankan jalur admin dengan blok Suspense terpisah
   if (view === 'admin') {
-    return loggedInUser ? <AdminRouter /> : <AdminLogin />;
+    return (
+      <Suspense fallback={<AdminLoadingFallback />}>
+        {loggedInUser ? <AdminRouter /> : <AdminLogin />}
+      </Suspense>
+    );
   }
 
-  // Tampilan Pelanggan
+  // Tampilan Pelanggan Nyala Instan
   return (
     <CustomerLayout>
       {view === 'dashboard' && <DashboardView />}
