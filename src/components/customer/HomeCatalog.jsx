@@ -6,6 +6,32 @@ import {
 import { AppStateContext, formatRupiah } from '../../context/AppContext';
 
 // ============================================================================
+// KOMPONEN: SKELETON LOADING (EFEK BAYANGAN UNTUK PELANGGAN BARU)
+// ============================================================================
+const ProductSkeleton = () => (
+  <div className="bg-white rounded-2xl shadow-sm border border-stone-100 overflow-hidden flex flex-col animate-pulse">
+    <div className="h-64 bg-stone-200"></div>
+    <div className="p-6 flex flex-col flex-grow">
+      <div className="h-6 bg-stone-200 rounded-full w-3/4 mb-3"></div>
+      <div className="h-4 bg-stone-200 rounded-full w-1/3 mb-5"></div>
+      <div className="h-8 bg-stone-200 rounded-full w-1/2 mb-5"></div>
+      <div className="h-3 bg-stone-200 rounded-full w-full mb-2"></div>
+      <div className="h-3 bg-stone-200 rounded-full w-5/6 mb-6"></div>
+      <div className="mt-auto pt-5 border-t border-stone-100 flex justify-between items-center">
+         <div className="h-4 bg-stone-200 rounded-full w-1/4"></div>
+         <div className="h-10 bg-stone-200 rounded-full w-1/3"></div>
+      </div>
+    </div>
+  </div>
+);
+
+const SkeletonGrid = ({ count = 4 }) => (
+  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 w-full">
+    {Array.from({ length: count }).map((_, i) => <ProductSkeleton key={`skel-${i}`} />)}
+  </div>
+);
+
+// ============================================================================
 // KOMPONEN: MICRO-SLIDESHOW BENTO BOX (BERANDA)
 // ============================================================================
 export const BentoCategoryBox = ({ categoryName, className }) => {
@@ -118,7 +144,7 @@ export const ProductCardItem = ({ product, openDetail }) => {
 // VIEWS (DASHBOARD & CATALOG)
 // ============================================================================
 export const DashboardView = () => {
-  const { setView, db, cTheme, getAvailableStock, cart, addToCart, toggleWishlist, loggedInMember } = useContext(AppStateContext);
+  const { setView, db, cTheme, getAvailableStock, cart, addToCart, toggleWishlist, loggedInMember, isDbLoading } = useContext(AppStateContext);
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [currentImgIdx, setCurrentImgIdx] = useState(0);
   const [selectedSize, setSelectedSize] = useState('');
@@ -216,6 +242,7 @@ export const DashboardView = () => {
 
   return (
     <div className="space-y-12 md:space-y-16 animate-fade-in-down w-full flex-grow">
+      {/* HEADER BANNER - Tampil Instan! */}
       <div className={`relative ${cTheme.bg} rounded-[2.5rem] overflow-hidden shadow-2xl min-h-[400px] flex items-center`}>
         <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1490481651871-ab68de25d43d?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-20 mix-blend-overlay"></div>
         <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/30 to-transparent"></div>
@@ -233,31 +260,42 @@ export const DashboardView = () => {
          <div className="md:hidden flex overflow-x-auto gap-4 pb-6 no-scrollbar snap-x snap-mandatory"><BentoCategoryBox categoryName={bentoCats[0]} className="w-[85vw] h-[350px] shrink-0 snap-center" /><BentoCategoryBox categoryName={bentoCats[1]} className="w-[85vw] h-[350px] shrink-0 snap-center" /><BentoCategoryBox categoryName={bentoCats[2]} className="w-[85vw] h-[350px] shrink-0 snap-center" /></div>
       </div>
 
-      {promoProducts.length > 0 && (
-        <div className="relative">
-           <div className="flex justify-between items-end mb-8"><div><h2 className="text-3xl font-serif font-bold text-stone-900 flex items-center gap-3"><Tag className="w-8 h-8 text-red-600"/> Penawaran Spesial</h2><p className="text-stone-500 mt-2">Dapatkan gaun dan setelan impianmu dengan harga khusus.</p></div><button onClick={() => setView('catalog')} className="hidden sm:flex text-rose-600 font-bold items-center hover:text-rose-800 transition-colors">Lihat Semua <ChevronRight className="w-4 h-4 ml-1"/></button></div>
-           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">{promoProducts.map((p, idx) => <ProductCardItem key={`promo-${p.id}-${idx}`} product={p} openDetail={openDetail} />)}</div>
-           <button onClick={() => setView('catalog')} className="w-full mt-6 sm:hidden border-2 border-stone-200 text-stone-700 font-bold py-3 rounded-xl hover:bg-stone-50">Lihat Semua Promo</button>
+      {/* SKELETON EFFECT JIKA DATABASE SEDANG DIMUAT */}
+      {isDbLoading && (!db.products || db.products.length === 0) ? (
+        <div className="relative pt-10">
+           <div className="mb-6"><h2 className="text-2xl font-serif font-bold text-stone-300">Menyiapkan Koleksi...</h2></div>
+           <SkeletonGrid count={4} />
         </div>
+      ) : (
+        <>
+          {promoProducts.length > 0 && (
+            <div className="relative">
+               <div className="flex justify-between items-end mb-8"><div><h2 className="text-3xl font-serif font-bold text-stone-900 flex items-center gap-3"><Tag className="w-8 h-8 text-red-600"/> Penawaran Spesial</h2><p className="text-stone-500 mt-2">Dapatkan gaun dan setelan impianmu dengan harga khusus.</p></div><button onClick={() => setView('catalog')} className="hidden sm:flex text-rose-600 font-bold items-center hover:text-rose-800 transition-colors">Lihat Semua <ChevronRight className="w-4 h-4 ml-1"/></button></div>
+               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">{promoProducts.map((p, idx) => <ProductCardItem key={`promo-${p.id}-${idx}`} product={p} openDetail={openDetail} />)}</div>
+               <button onClick={() => setView('catalog')} className="w-full mt-6 sm:hidden border-2 border-stone-200 text-stone-700 font-bold py-3 rounded-xl hover:bg-stone-50">Lihat Semua Promo</button>
+            </div>
+          )}
+
+          {displayProducts.length > 0 && (
+            <div>
+               <div className="flex justify-between items-end mb-8">
+                  <div><h2 className="text-3xl font-serif font-bold text-stone-900 flex items-center gap-3">{bestSellers.length > 0 ? <><Star className="w-8 h-8 text-yellow-500 fill-yellow-500"/> Paling Diminati</> : <><Sparkles className="w-8 h-8 text-amber-500"/> Koleksi Terbaru</>}</h2><p className="text-stone-500 mt-2">Pilihan favorit para pelanggan untuk tampil memukau.</p></div>
+                  <button onClick={() => setView('catalog')} className="hidden sm:flex text-rose-600 font-bold items-center hover:text-rose-800 transition-colors">Katalog Lengkap <ChevronRight className="w-4 h-4 ml-1"/></button>
+               </div>
+               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">{displayProducts.map((p, idx) => <ProductCardItem key={`disp-${p.id}-${idx}`} product={p} openDetail={openDetail} />)}</div>
+               <button onClick={() => setView('catalog')} className="w-full mt-6 sm:hidden border-2 border-stone-200 text-stone-700 font-bold py-3 rounded-xl hover:bg-stone-50">Lihat Semua Koleksi</button>
+            </div>
+          )}
+        </>
       )}
 
-      {displayProducts.length > 0 && (
-        <div>
-           <div className="flex justify-between items-end mb-8">
-              <div><h2 className="text-3xl font-serif font-bold text-stone-900 flex items-center gap-3">{bestSellers.length > 0 ? <><Star className="w-8 h-8 text-yellow-500 fill-yellow-500"/> Paling Diminati</> : <><Sparkles className="w-8 h-8 text-amber-500"/> Koleksi Terbaru</>}</h2><p className="text-stone-500 mt-2">Pilihan favorit para pelanggan untuk tampil memukau.</p></div>
-              <button onClick={() => setView('catalog')} className="hidden sm:flex text-rose-600 font-bold items-center hover:text-rose-800 transition-colors">Katalog Lengkap <ChevronRight className="w-4 h-4 ml-1"/></button>
-           </div>
-           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">{displayProducts.map((p, idx) => <ProductCardItem key={`disp-${p.id}-${idx}`} product={p} openDetail={openDetail} />)}</div>
-           <button onClick={() => setView('catalog')} className="w-full mt-6 sm:hidden border-2 border-stone-200 text-stone-700 font-bold py-3 rounded-xl hover:bg-stone-50">Lihat Semua Koleksi</button>
-        </div>
-      )}
       {renderDetailModal()}
     </div>
   );
 };
 
 export const CatalogView = () => {
-  const { db, getAvailableStock, cTheme, loggedInMember, toggleWishlist, cart, addToCart } = useContext(AppStateContext);
+  const { db, getAvailableStock, cTheme, loggedInMember, toggleWishlist, cart, addToCart, isDbLoading } = useContext(AppStateContext);
   const [activeCategory, setActiveCategory] = useState('Semua');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDetail, setSelectedDetail] = useState(null);
@@ -276,6 +314,7 @@ export const CatalogView = () => {
   const closeDetail = () => setSelectedDetail(null);
 
   const renderDetailModal = () => {
+    // ... (Logika Modal sama seperti di atas, tidak diubah untuk menghemat ruang, biarkan tetap ada)
     if (!selectedDetail) return null;
     const hasDiscount = selectedDetail.discountPrice > 0;
     const sizesObj = selectedDetail.sizes || { 'All Size': selectedDetail.totalStock };
@@ -375,7 +414,9 @@ export const CatalogView = () => {
           ))}
         </div>
 
-        {paginatedProducts.length === 0 ? (
+        {isDbLoading && (!db.products || db.products.length === 0) ? (
+            <SkeletonGrid count={8} />
+        ) : paginatedProducts.length === 0 ? (
             <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-stone-200">
                 <Package className="w-16 h-16 mx-auto mb-4 text-stone-300"/><h3 className="text-xl font-bold text-stone-800 mb-2">Katalog Kosong</h3><p className="text-stone-500">Saat ini belum ada produk yang cocok dengan pencarianmu.</p>
             </div>
@@ -385,7 +426,7 @@ export const CatalogView = () => {
             </div>
         )}
 
-        {filteredProducts.length > page * ITEMS_PER_PAGE && (
+        {!isDbLoading && filteredProducts.length > page * ITEMS_PER_PAGE && (
             <div className="flex justify-center mt-10">
                <button onClick={() => setPage(p => p + 1)} className="px-8 py-3.5 bg-stone-900 text-white font-bold rounded-full hover:bg-black shadow-lg active:scale-95 transition-all">Muat Lebih Banyak Koleksi</button>
             </div>
@@ -395,5 +436,3 @@ export const CatalogView = () => {
     </>
   );
 };
-
-export default DashboardView;
